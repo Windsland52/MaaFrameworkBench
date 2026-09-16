@@ -152,6 +152,46 @@ runs/<run_id>/
 
 `status` 取 `succeeded | failed | timeout | error` —— **这只是"跑完了没有"，不是"做对了没有"**。做对没有看 `score.json`。
 
+### 账：`usage` / `timing`（被测系统自报）
+
+```jsonc
+"usage": {
+  "source": "dsh-usage-hook@1",     // 必填：自报的数据必须能追来源
+  "billing": { "mode": "metered", "plan": "team" }, // 可选；出现则 mode 必填
+  "by_model": [                     // 必填、非空；桶 = 唯一键（provider, model, role）
+    {
+      "provider": "deepseek",       // 可选
+      "model": "deepseek-v4.1-flash",              // 必填：臂里请求的，计价按它
+      "model_reported": "deepseek-v4.1-flash-2026-08-01", // 可选：厂商回执的快照；拿不到 = null
+      "role": "main",                    // 可选：main | subagent | …
+      "input_tokens": 128400, "output_tokens": 8210,
+      "cache_read_input_tokens": 96000, "cache_write_input_tokens": 12400,
+      "reasoning_tokens": 1380, "turns": 41, "tool_calls": 133
+    }
+  ],
+  "timing": { "agent_wall_ms": 486000, "llm_ms": 302000, "tool_ms": 151000 } // 可选
+},
+"usage_file": { "path": "usage.json", "sha256": "…", "bytes": 1234 }, // 原始文件归档的指纹
+"usage_error": "…"   // 记账坏了写这条：`usage` 与 `usage_file` 都不出现，**但 run 照旧有效**
+```
+
+计数（`*_tokens` / `turns` / `tool_calls` / 计时）**缺省或 null 一律落成 `null`**，
+给了就必须是非负**安全**整数 —— 越过 2^53 的加总会静默失真，所以 1e21 这类值直接拒。
+坏输入（类型不对、越界、桶键重复、`source` 缺失）**一律拒绝**，不替它圆。
+
+**厂商原始报文不进 `run.json`**：原始 usage 文件整份原样归档成 run 目录下的 `usage.json`，
+`run.json` 只留规范化结果与它的大小和指纹。原始报文可达 MB 级，而 `run.json` 是每个聚合器都要解析的文件。
+
+四条纪律：
+
+1. **自报的必须标 `source`，且 `null ≠ 0`**：没报是 `null`，不是 0。静默变 0 能把整批成本结论翻过来，还看不出。
+2. **只存明细不存总量**：`by_model` 是唯一真相，报告层自己加总；同时存两份数早晚打架。
+3. **`model_reported` 拿不到就写 null**，不拿声明名充数 —— 快照未知是事实，不是缺陷。
+4. **cost 不是测量值**：它是"定价表 × 测量值"的派生量，定价表单独版本化，报告里写清按哪版折算。
+   订阅制的批**不和计量制混着报美元**。
+
+我们测的账在别处，不在这里重复：`wall_ms`（这次跑了多久）、`ops.jsonl`（识别/点击明细）、`score.json.metrics`（判分时的派生）。
+
 `run_id` 编码 `task.system.seed.repeat`，且必须能解析回来（聚合靠它分组）。
 
 `subset` 记录本次跑的是哪个子集及其定义哈希。**没有它，聚合时分不清"这批是 10 个任务还是 100 个任务"**，见 §6。

@@ -1,5 +1,7 @@
-import { readFileSync, rmSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { REPO_ROOT } from '../src/runner/root.ts'
 import { runTask } from '../src/runner/main.ts'
 import { score } from '../src/scorer/main.ts'
@@ -74,7 +76,86 @@ async function checkReproducible(): Promise<boolean> {
   return same
 }
 
+/**
+ * 记账这条支路的端到端覆盖。
+ *
+ * 为什么单独有这一段：在它之前，"坏账不影响 run"这句承诺**零覆盖** —— check-usage.ts
+ * 只测纯函数，从没跑过 main.ts 的 usageFrom 分支；而一轮审查实测出来的结论才是唯一证据。
+ * 承诺和检查必须成对，否则那句承诺迟早变成假的。
+ */
+async function checkUsageBranch(): Promise<number> {
+  const dir = mkdtempSync(join(tmpdir(), 'maafwbench-usage-'))
+  const good = join(dir, 'good.json')
+  const bad = join(dir, 'bad.json')
+  writeFileSync(
+    good,
+    JSON.stringify({
+      source: 'verify@1',
+      billing: { mode: 'metered' },
+      by_model: [{ provider: 'p', model: 'm', role: 'main', input_tokens: 7, output_tokens: 3 }],
+      timing: { agent_wall_ms: 1000, llm_ms: 600, tool_ms: 300 },
+    }),
+  )
+  writeFileSync(bad, JSON.stringify({ by_model: [] }))
+
+  let bad_ = 0
+  const report = (ok: boolean, name: string, detail: string): void => {
+    if (!ok) bad_ += 1
+    console.log((ok ? 'OK  ' : 'FAIL') + ' | ' + name + '\n       ' + detail)
+  }
+
+  // 好账：落进 run.json，原始文件归档，指纹对得上
+  rmSync(resolve(REPO_ROOT, 'runs', 't001-enter-inventory.verify.s1.r8'), { recursive: true, force: true })
+  const r1 = await runTask('t001-enter-inventory', {
+    system: 'verify',
+    seed: 1,
+    repeat: 8,
+    pipelineFrom: resolve(REPO_ROOT, 'systems/ref/main.json'),
+    usageFrom: good,
+  })
+  const run1 = JSON.parse(readFileSync(resolve(r1.runDir, 'run.json'), 'utf8')) as Record<string, unknown>
+  const archive1 = resolve(r1.runDir, 'usage.json')
+  const sha1 = existsSync(archive1) ? createHash('sha256').update(readFileSync(archive1)).digest('hex') : ''
+  const recorded = (run1.usage_file as { sha256?: string } | undefined)?.sha256
+  report(
+    run1.usage !== undefined && run1.usage_error === undefined && recorded === sha1 && sha1 !== '',
+    '好账：记入 run.json + 原始文件归档 + 指纹对得上',
+    '归档 sha=' + sha1.slice(0, 12) + '，run.json 记的=' + String(recorded).slice(0, 12),
+  )
+
+  // 坏账：run 照样成功、照样判分，只留 usage_error
+  rmSync(resolve(REPO_ROOT, 'runs', 't001-enter-inventory.verify.s1.r9'), { recursive: true, force: true })
+  const r2 = await runTask('t001-enter-inventory', {
+    system: 'verify',
+    seed: 1,
+    repeat: 9,
+    pipelineFrom: resolve(REPO_ROOT, 'systems/ref/main.json'),
+    usageFrom: bad,
+  })
+  const run2 = JSON.parse(readFileSync(resolve(r2.runDir, 'run.json'), 'utf8')) as Record<string, unknown>
+  const scored2 = await score(r2.runDir)
+  report(
+    r2.status === 'succeeded' && scored2.passed && run2.usage === undefined && typeof run2.usage_error === 'string',
+    '坏账：run 仍成功并判分，只记 usage_error',
+    'status=' +
+      r2.status +
+      ' passed=' +
+      scored2.passed +
+      ' usage_error=' +
+      JSON.stringify(String(run2.usage_error).slice(0, 40)),
+  )
+  report(
+    r2.usageError === undefined ? false : true,
+    '坏账：usageError 也回到了调用方（批量脚本能看见）',
+    JSON.stringify(r2.usageError),
+  )
+
+  rmSync(dir, { recursive: true, force: true })
+  return bad_
+}
+
 let failures = 0
+failures += await checkUsageBranch()
 if (!(await checkReproducible())) failures += 1
 for (const c of cases) {
   // runner 不允许同一个 (task, system, seed, repeat) 有第二条记录，自检重跑先清自己的目录

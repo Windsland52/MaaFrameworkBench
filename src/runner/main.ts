@@ -4,8 +4,9 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { hashTree } from './hash.ts'
+import { hashFile, hashTree } from './hash.ts'
 import { preflightPipeline } from './preflight.ts'
+import { parseUsage, type Usage } from './usage.ts'
 import { OCR_MODEL_DIR, REPO_ROOT } from './root.ts'
 import { loadTask, type TaskDef } from './task.ts'
 
@@ -25,6 +26,11 @@ export interface RunOptions {
   pipelineFrom?: string
   /** 覆盖 task.yaml 的墙钟预算，用来单独验证超时路径 */
   budgetWallMs?: number
+  /**
+   * 被测系统自报的 token / 时间账。**记账坏了不影响 run** ——
+   * 一次真实测量比一次记账贵得多，所以坏输入只记 usage_error，不终止。
+   */
+  usageFrom?: string
 }
 
 export interface RunResult {
@@ -32,6 +38,8 @@ export interface RunResult {
   runDir: string
   status: 'succeeded' | 'failed' | 'timeout' | 'error'
   submissionSha256: string
+  /** 记账被丢弃时的原因（run 仍然有效；这条是给批量脚本看的信号） */
+  usageError?: string
   /** 跑不完时说明卡在哪一步 */
   error?: string
 }
@@ -219,6 +227,24 @@ export async function runTask(taskId: string, opts: RunOptions): Promise<RunResu
   }
   submissionSha256 = hashTree(artifact).sha256
 
+  // 账在跑完之后补：它是这次 run 的附带事实，坏掉不该影响已经测到的东西。
+  let usage: Usage | undefined
+  let usageError: string | undefined
+  let usageFile: { path: string; sha256: string; bytes: number } | undefined
+  if (opts.usageFrom) {
+    const archive = join(runDir, 'usage.json')
+    try {
+      // 先原样归档再解析：这样"这份账属于哪次 run"能追（指纹进 run.json），
+      // 厂商的原始报文也只落在归档文件里，不把 run.json 撑大。
+      cpSync(resolve(opts.usageFrom), archive)
+      usageFile = { path: 'usage.json', sha256: hashFile(archive), bytes: statSync(archive).size }
+      usage = parseUsage(JSON.parse(readFileSync(archive, 'utf8')) as unknown)
+    } catch (err) {
+      usageError = (err instanceof Error ? err.message : String(err)) + '（文件: ' + opts.usageFrom + '）'
+      process.stderr.write('[usage] 记账被丢弃：' + usageError + '\n')
+    }
+  }
+
   // 失败的跑也留记录：否则「没交东西」和「跑挂了」在目录里长得一样，都是空。
   const finishedAt = new Date()
   writeFileSync(
@@ -238,13 +264,25 @@ export async function runTask(taskId: string, opts: RunOptions): Promise<RunResu
         framework: { maa_node: maaNodeVersion() },
         task_file: taskFile,
         error: failure,
+        // 我们测的：这次跑了多久（exec 的明细在 ops.jsonl，不在这里重复存）
         wall_ms: finishedAt.getTime() - started,
+        // 被测系统自报的：拿不到就整个缺省，不做空壳
+        ...(usage === undefined ? {} : { usage }),
+        ...(usageFile === undefined ? {} : { usage_file: usageFile }),
+        ...(usageError === undefined ? {} : { usage_error: usageError }),
       },
       null,
       2,
     ),
   )
-  return { runId, runDir, status, submissionSha256, ...(failure === undefined ? {} : { error: failure }) }
+  return {
+    runId,
+    runDir,
+    status,
+    submissionSha256,
+    ...(failure === undefined ? {} : { error: failure }),
+    ...(usageError === undefined ? {} : { usageError }),
+  }
 }
 
 /** MaaFW 版本进 run.json：同一批分数必须能看出框架版本，否则跨版本不可比。 */
