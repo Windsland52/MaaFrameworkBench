@@ -11,6 +11,7 @@ interface MaaModule {
   Resource: new () => maa.Resource
   CustomController: new (actor: maa.CustomControllerActor) => maa.Controller
   Tasker: new () => maa.Tasker
+  Global: typeof maa.Global
 }
 
 export const maafw = (globalThis as unknown as { maa: MaaModule }).maa

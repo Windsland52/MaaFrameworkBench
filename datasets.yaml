@@ -1,14 +1,12 @@
 # 数据集清单 —— 主仓只放这个文件，二进制一律不进 git
 #
 # 为什么不在仓里：二进制进历史后永久占位；独立成包还可下架、可单独分发。
-# 用法：npm run fetch -- <id> [<id>...]   或   npm run fetch -- --all
+# 用法：pnpm datasets [<id>...]，不带 id 即全部。
 #
-# kind 说明（当前只实现 dependency，其余等真正需要时再加）：
+# kind 说明：
 #   dependency —— 运行依赖，落到 vendor/
 #   images     —— 静态图片包（识别类任务用）
-#   recording  —— 真实录制包（操作序列 + 逐帧图 + 事件流）
-#   env        —— 交互环境包（网页标本应用）
-#   log        —— 日志包
+#   recording / env / log —— 待实现
 
 defaults:
   data_root: data
@@ -29,3 +27,19 @@ datasets:
         sha256: b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d
       - name: README.md
         sha256: f32bfb344084554b90650c33866ce21e4995cedd533754d1be27f0978a190312
+
+  # 版本控制只认 sha256：generate 出来的帧只要有一个字节不同，这里就会报错，
+  # 不会出现"本机画面和别人的不一样，分数却放在一起比"。
+  maafw-demo-frames:
+    kind: images
+    target: data/maafw-demo-frames
+    license: CC0-1.0
+    note: 合成标本画面（1280x720），由脚本确定性生成，不是真实设备采集
+    generate: scripts/generate-frames.ts
+    files:
+      - name: home.png
+        sha256: 84434ad909bc95251e11d92bec07f9043e39e950b592e40cc43759cee8e01aac
+      - name: inventory.png
+        sha256: 8af105988d252c2b9eb2c2be9d21760d5d28ac48300ed815a87c10b95c610eaa
+      - name: inventory-zero.png
+        sha256: 640711b490fd8d3d744dd2cc97a53d29439982601594ff4c23b159d04a7e4260
