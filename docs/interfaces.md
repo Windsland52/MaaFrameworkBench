@@ -1,6 +1,7 @@
 # 接口冻结 v1
 
 > 日期：2026-09-15 · 状态：**冻结**（改动需显式记版本）
+> v1.1（2026-09-16）：断言加 `reco_text`；`frames` 的屏序列、`ops.jsonl` 字段按实测补全
 > 目的：让"重开会话"和"上团队"都成立 —— 后续所有工作只依赖本文 + `MaaFrameworkBench-设计定稿-2026-09-15.md`
 > 已实测的实施事实见文末。
 
@@ -75,13 +76,14 @@ assert:                         # 判据（行为断言，held-out）
 include: [seed/**, visible/**]  # 物化进 agent 工作区的白名单
 ```
 
-**断言种类（v1 只这三种）**
+**断言种类（v1.1 四种）**
 
-| kind        | 判什么                                               |
-| ----------- | ---------------------------------------------------- |
-| `env_state` | 环境最终状态字段（**业务达成**，不是框架 succeeded） |
-| `node_hit`  | 节点命中集合 / 顺序（轨迹）                          |
-| `op_count`  | 识别次数 / 点击次数 / 耗时（效率）                   |
+| kind        | 判什么                                                                            |
+| ----------- | --------------------------------------------------------------------------------- |
+| `env_state` | 环境最终状态字段（**业务达成**，不是框架 succeeded）                              |
+| `node_hit`  | 节点命中集合 / 顺序（轨迹）                                                       |
+| `reco_text` | 指定节点识别到的文本 —— **v1.1 新增**：答案是画面内容时唯一能判「答对没有」的断言 |
+| `op_count`  | 识别次数 / 点击次数（效率）                                                       |
 
 > 命名说明：原叫 `sim_state`，但环境不再只有"模拟器"一种（见 §3），改名为环境中性的 `env_state`。
 
@@ -151,18 +153,39 @@ runs/<run_id>/
 
 ### 已实现的 `frames` 环境
 
-`frames` 只是一组帧 + 一个喂帧的控制器，**没有「应用」概念**：
+`frames` 是一组帧 + 一个喂帧的控制器，**没有「应用」概念**：
 
 ```ts
 bootFramesEnv({
-  bundle: string,        // MaaFW 资源包目录（不含 model/）
-  framePath: string,     // 喂什么画面（screencap 的返回值）
-  ocrModelDir?: string,  // 默认 vendor/ocr
+  bundle: string,          // 资源包根目录（含 pipeline/），不是它的上一级
+  screens: FramesScreen[], // 画面序列，第一屏是初始画面
+  ocrModelDir: string,
+  logDir: string,          // MaaFW 自己的日志落这里
 })
-// -> { res, ctrl, tasker, ok, teardown() }
+// -> { res, ctrl, tasker, actor, ok, teardown() }
+
+interface FramesScreen {
+  name: string             // 屏名，也是 env_state 断言能取的 path
+  path: string             // PNG 文件
+  transitions?: Array<{ area: [x, y, w, h]; target: string }>
+}
 ```
 
-它回答不了「点了之后会怎样」—— 输入直接返回成功、画面不变。**所以只够识别类任务。**
+**画面可以依赖输入**：输入落在某屏的 `transitions` 矩形内就切屏，否则画面不变。
+这样「点对了没有」看得见，但**单屏只有一条路径** —— 这正是它只够识别类任务的原因；
+能容纳任意动作 = 状态转移逻辑由我们拥有，那是 `web` 环境的事。
+
+**环境不回答「读了什么」**：识别结果是框架的产物，环境只记录画面与输入。
+判「答对没有」用 `reco_text` 断言（比对节点识别到的文本），不看环境。
+
+#### `ops.jsonl` 的一行
+
+```json
+{"op":"click","arg":{"x":262,"y":386},"screen":"home","ok":true,"moved":true,"at":1789520088381}
+```
+
+`screen` 是**动作出发时**的屏，`moved` 是这次输入有没有真的把画面带过去。
+缺了 `moved`，一份 ops 只能看出「点过」，看不出「点对了没有」。
 
 **运行期铁律**（适用于所有自研环境）
 
