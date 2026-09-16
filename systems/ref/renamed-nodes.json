@@ -1,0 +1,17 @@
+{
+  "Main.Start": {
+    "recognition": "OCR",
+    "expected": ["STOCK"],
+    "action": "Click",
+    "next": ["OpenStock"]
+  },
+  "OpenStock": {
+    "recognition": "OCR",
+    "expected": ["INVENTORY"],
+    "next": ["ReadCount"]
+  },
+  "ReadCount": {
+    "recognition": "OCR",
+    "expected": ["12"]
+  }
+}

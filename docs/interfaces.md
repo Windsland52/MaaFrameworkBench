@@ -37,10 +37,13 @@ tasks/<task_id>/
   seed/                # 种子项目：agent 要改的东西（CMP 形状）
     interface.json
     resource/base/pipeline/*.json
-  visible/             # agent 可见的帧（相当于"你能看到的屏幕"）
-    frame-01.png
-  expected/            # 可选：held-out 变体（泛化判据用），绝不物化进工作区
 ```
+
+**画面是数据，声明不是副本。** `visible` 与 `env.screens` 只写帧的**名字**；
+帧本身来自 `datasets.yaml` 的 images 包，落 `data/<id>/`。
+所以任务包里没有图片文件 —— 主仓不放二进制（§5）。
+`visible` 里的帧物化进工作区 `frames/`（相当于"你能看到的屏幕"），
+其余帧（held-out 变体）只在环境进程里可达，绝不进工作区。
 
 ### task.yaml
 
@@ -50,10 +53,24 @@ id: t001-enter-inventory
 kind: fix                       # 任务形态：fix | extend | scratch（分组用）
 covers: [2.1.4, 2.1.5, 4.2.1]   # 覆盖的最小可测项 —— 轴与维度由编号推出，不另设字段
 
-env:                            # 用哪种环境
+env:
   type: frames                  # frames | web | replay
-  dataset: img-example          # 引用 datasets.yaml 的 id
-  # frames 用 images 包，replay 用 recording 包；web 的配置字段等它落地再定
+  dataset: maafw-demo-frames    # 引用 datasets.yaml 的 id
+  dir: maafw-demo-frames        # 数据集目录名（相对 data_root）
+  screens:                      # 画面序列；第一屏是初始画面
+    - name: home                # 屏名，也是 env_state 断言能取的值
+      path: home.png            # 数据集内的文件名
+      transitions:              # 输入落进矩形就切屏；不声明则画面不变
+        - area: [140, 300, 320, 140]
+          target: inventory
+    - name: inventory
+      path: inventory.png
+      transitions:
+        - area: [1040, 480, 320, 140]
+          target: home
+    - name: inventory-zero      # held-out 变体：环境里可达，绝不物化进工作区
+      path: inventory-zero.png
+  # replay 用 recording 包；web 的配置字段等它落地再定
 
 entry: Main.Start               # 跑哪个入口节点
 
@@ -68,12 +85,14 @@ assert:                         # 判据（行为断言，held-out）
   - kind: env_state
     path: screen
     equals: inventory
-  - kind: node_hit              # 可选：轨迹断言
-    required: [Main.Start, GoInventory]
+  - kind: node_hit              # 只锚定题面写死的名字（见下）
+    required: [Main.Start]
+  - kind: reco_text             # 不写 node：任一节点读到过就算
+    equals: "12"                # agent 答出的那个值
   - kind: op_count
     max_screencaps: 30          # 效率项（对应 4.2.1）
 
-include: [seed/**, visible/**]  # 物化进 agent 工作区的白名单
+visible: [home.png]             # 物化进 agent 工作区 frames/ 的帧；其余帧只在环境里
 ```
 
 **断言种类（v1.1 四种）**
@@ -87,6 +106,11 @@ include: [seed/**, visible/**]  # 物化进 agent 工作区的白名单
 
 > 命名说明：原叫 `sim_state`，但环境不再只有"模拟器"一种（见 §3），改名为环境中性的 `env_state`。
 
+**判据只能锚定题面约定过的名字。** `node_hit` / `reco_text` 里写的节点名，
+只有在 `prompt` 里明确要求过的时候才公平：否则同一份正确的产出，换个命名就会挂 —— 判的是
+实现风格，不是业务达成（这正是 §0 第 3 条「把当下个例当通则」）。
+所以 `reco_text` 的 `node` 是可选的：不写就是「这一跑里任何节点读到过这段文本」。
+
 ---
 
 ## 2. run 产物
@@ -96,6 +120,7 @@ runs/<run_id>/
   run.json        # 身份与元数据
   events.jsonl    # task / node 事件流
   ops.jsonl       # 控制器操作序列（环境侧记录）
+  exec-summary.json # 执行子进程的回执：ops 原始记录、最终屏、终止原因
   artifact/       # agent 提交工件的快照
   score.json      # 判分结果（§4）
   logs/           # MaaFW 自己的日志（maafw.log，含 all_results_ / filtered_results_）
@@ -357,12 +382,13 @@ src/env/                   环境层：每种环境产出一个 MaaFW Controller
   replay/                  真实录制回放（待建）
 src/runner/                执行器（待建）
 src/scorer/                判分器（待建）
-tasks/<task_id>/           任务包（task.yaml + seed/ + visible/ + expected/）
+tasks/<task_id>/           任务包（task.yaml + seed/；画面在数据集里，不在包内）
 vendor/                    依赖（gitignore），由 datasets.yaml 拉取
 data/<dataset-id>/         数据集落地（gitignore）
 datasets.yaml              数据集清单
 subsets.yaml               子集定义
 scripts/                   工具脚本
+systems/<name>/            一个被测系统的产出（提交物）；评测时它就是那份首次提交
 runs/                      运行产物（gitignore，不入库）
 ```
 

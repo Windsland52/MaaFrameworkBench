@@ -28,24 +28,27 @@ interface Case {
 }
 
 const cases: Case[] = [
-  { name: '正确实现', pipeline: 'tmp/t001-main.json', repeat: 1, expectPass: true },
+  { name: '正确实现', pipeline: 'systems/ref/main.json', repeat: 1, expectPass: true },
+  // 与上一条行为完全相同，只有节点名不同（Main.Start 是题面约定过的，其余不是）。
+  // 它必须过 —— 判据锚定题面没约定的名字，判的就是实现风格。
+  { name: '同样的行为、不同的节点名', pipeline: 'systems/ref/renamed-nodes.json', repeat: 7, expectPass: true },
   {
     name: '点错按钮（点在不响应的地方）',
-    pipeline: 'tmp/t001-wrong-button.json',
+    pipeline: 'systems/ref/wrong-button.json',
     repeat: 2,
     expectPass: false,
-    expectFailing: ['env_state', 'node_hit', 'reco_text'],
+    expectFailing: ['env_state', 'reco_text'], // node_hit 只锚定入口，入口是命中的
   },
   {
     name: '读错数量',
-    pipeline: 'tmp/t001-wrong-answer.json',
+    pipeline: 'systems/ref/wrong-answer.json',
     repeat: 3,
     expectPass: false,
-    expectFailing: ['node_hit', 'reco_text'],
+    expectFailing: ['reco_text'], // 同理：进入库存页那步是命中的，挂的是没读到数量
   },
   {
     name: '跑不完（墙钟 400ms）',
-    pipeline: 'tmp/t001-main.json',
+    pipeline: 'systems/ref/main.json',
     repeat: 4,
     expectPass: false,
     expectFailing: ['env_state', 'node_hit', 'reco_text'],
@@ -62,7 +65,7 @@ async function checkReproducible(): Promise<boolean> {
       system: 'verify',
       seed: 1,
       repeat,
-      pipelineFrom: resolve(REPO_ROOT, 'tmp/t001-main.json'),
+      pipelineFrom: resolve(REPO_ROOT, 'systems/ref/main.json'),
     })
     hashes.push(r.submissionSha256)
   }

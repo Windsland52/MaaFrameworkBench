@@ -20,7 +20,9 @@ export type AssertSpec =
   | { kind: 'env_state'; path: string; equals: unknown }
   | { kind: 'node_hit'; order?: string[]; required?: string[] }
   /** 某个节点识别到的文本（答案是画面内容的任务靠它判"答对没有"） */
-  | { kind: 'reco_text'; node: string; equals: string }
+  /** node 可选：写了只认那个节点；不写就是「这一跑里任何节点读到过这段文本」——
+      节点名只有在题面约定过的时候才是公平的判据，否则等于判了实现风格 */
+  | { kind: 'reco_text'; node?: string; equals: string }
   | { kind: 'op_count'; max_screencaps?: number; max_clicks?: number }
 
 export interface TaskDef {

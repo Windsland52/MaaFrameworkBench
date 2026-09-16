@@ -21,7 +21,7 @@ env:
     - name: inventory-zero
       path: inventory-zero.png # held-out 变体：同屏、数量不同
 
-visible: [tasks/t001-enter-inventory/visible/]
+visible: [home.png] # 数据集里的帧；物化到工作区的 frames/ 下
 entry: Main.Start
 
 prompt: |
@@ -29,6 +29,7 @@ prompt: |
 
   要求：从 HOME 屏进入 INVENTORY 屏，然后答出那一屏上序号显示的数量。
   产出一份能跑通的 pipeline（写进 resource/base/pipeline/），入口节点为 Main.Start。
+  按钮要靠识别定位，不要写死坐标。
 
   可用资源：
     - resource/base 是资源包根目录（pipeline/ 与 image/ 都在这一层）
@@ -41,14 +42,15 @@ budget:
   wall_ms: 120000
   max_screencaps: 200
 
+# 断言只锚定**题面约定过的名字**。Main.Start 是 prompt 里写死的入口；
+# 其余节点叫什么都不判 —— 那属于实现风格，换个命名就挂的判据判错了东西。
 assert:
   - kind: env_state
     path: screen
     equals: inventory
   - kind: node_hit
-    order: [Main.Start, Main.AtInventory, Main.Quantity]
-  - kind: reco_text
-    node: Main.Quantity
-    equals: '12' # agent 答出的数量；held-out 变体上这个值不同
+    required: [Main.Start]
+  - kind: reco_text # 不写 node：这一跑里任何节点读到过这个值就算
+    equals: '12' # held-out 变体上是另一个值
   - kind: op_count
     max_screencaps: 30

@@ -5,13 +5,11 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hashTree } from './hash.ts'
+import { preflightPipeline } from './preflight.ts'
 import { OCR_MODEL_DIR, REPO_ROOT } from './root.ts'
 import { loadTask, type TaskDef } from './task.ts'
 
 const CHILD = resolve(dirname(fileURLToPath(import.meta.url)), 'child.ts')
-
-/** 工作区里不放运行产物：它只是"agent 改的那个项目"。 */
-const WORKSPACE_SKIP = ['artifact', 'frames']
 
 export interface RunOptions {
   /** 被测系统标识，进 run_id */
@@ -34,6 +32,8 @@ export interface RunResult {
   runDir: string
   status: 'succeeded' | 'failed' | 'timeout' | 'error'
   submissionSha256: string
+  /** 跑不完时说明卡在哪一步 */
+  error?: string
 }
 
 interface ExecSummary {
@@ -146,7 +146,7 @@ export async function runTask(taskId: string, opts: RunOptions): Promise<RunResu
   const started = Date.now()
   let status: RunResult['status'] = 'error'
   let submissionSha256 = ''
-  let childStderr = ''
+  let failure: string | undefined
   try {
     materialize(task, workspace, repoRoot)
     if (opts.pipelineFrom) {
@@ -155,83 +155,96 @@ export async function runTask(taskId: string, opts: RunOptions): Promise<RunResu
       cpSync(resolve(opts.pipelineFrom), target)
     }
 
-    const screens =
-      task.env.type === 'frames'
-        ? task.env.screens.map((s) => ({ ...s, path: sourcePath(repoRoot, task, s.path) }))
-        : []
-    for (const s of screens) if (!existsSync(s.path)) throw new Error('环境画面不在: ' + s.path)
+    const bundle = join(workspace, 'resource', 'base')
+    const problems = preflightPipeline(bundle, task.entry)
+    if (problems.length > 0) {
+      failure = '提交不合规: ' + problems.join('；')
+    } else {
+      const screens =
+        task.env.type === 'frames'
+          ? task.env.screens.map((s) => ({ ...s, path: sourcePath(repoRoot, task, s.path) }))
+          : []
+      for (const s of screens) if (!existsSync(s.path)) throw new Error('环境画面不在: ' + s.path)
 
-    const cfgFile = join(runDir, 'exec-config.json')
-    writeFileSync(
-      cfgFile,
-      JSON.stringify(
-        {
-          workspace,
-          bundle: join(workspace, 'resource', 'base'),
-          ocrModelDir: OCR_MODEL_DIR,
-          logDir,
-          eventsFile: join(runDir, 'events.jsonl'),
-          summaryFile: join(runDir, 'exec-summary.json'),
-          entry: task.entry,
-          screens,
-        } satisfies Record<string, unknown>,
-        null,
-        2,
-      ),
-    )
-
-    const exec = await execInChild(cfgFile, opts.budgetWallMs ?? task.budget.wall_ms ?? 120_000)
-    childStderr = exec.stderr
-    rmSync(cfgFile, { force: true })
-
-    const summary: ExecSummary | null = existsSync(join(runDir, 'exec-summary.json'))
-      ? (JSON.parse(readFileSync(join(runDir, 'exec-summary.json'), 'utf8')) as ExecSummary)
-      : null
-
-    // 提交 = 跑完那一刻工作区的快照。先落快照、再算哈希，之后只认这个哈希。
-    cpSync(workspace, artifact, { recursive: true, filter: (src) => !WORKSPACE_SKIP.some((s) => src.endsWith(s)) })
-    submissionSha256 = hashTree(artifact).sha256
-
-    if (summary) {
+      const cfgFile = join(runDir, 'exec-config.json')
       writeFileSync(
-        join(runDir, 'ops.jsonl'),
-        summary.ops.map((op) => JSON.stringify(op)).join('\n') + (summary.ops.length ? '\n' : ''),
+        cfgFile,
+        JSON.stringify(
+          {
+            workspace,
+            bundle,
+            ocrModelDir: OCR_MODEL_DIR,
+            logDir,
+            eventsFile: join(runDir, 'events.jsonl'),
+            summaryFile: join(runDir, 'exec-summary.json'),
+            entry: task.entry,
+            screens,
+          } satisfies Record<string, unknown>,
+          null,
+          2,
+        ),
       )
-      status = summary.status === 'succeeded' ? 'succeeded' : summary.status === 'failed' ? 'failed' : 'error'
-    } else if (exec.timedOut) {
-      status = 'timeout'
-    }
 
-    const finishedAt = new Date()
-    writeFileSync(
-      join(runDir, 'run.json'),
-      JSON.stringify(
-        {
-          schema_version: 1,
-          run_id: runId,
-          task_id: task.id,
-          system: { harness: 'none@0', model: opts.system },
-          seed: opts.seed,
-          repeat_index: opts.repeat,
-          started_at: startedAt.toISOString(),
-          finished_at: finishedAt.toISOString(),
-          status,
-          submission: { path: 'artifact/', sha256: submissionSha256 },
-          framework: { maa_node: maaNodeVersion() },
-          task_file: taskFile,
-          error:
-            summary?.error ??
-            (exec.timedOut ? '墙钟超时，已硬杀进程组' : exec.code === 0 ? undefined : childStderr.trim() || undefined),
-          wall_ms: finishedAt.getTime() - started,
-        },
-        null,
-        2,
-      ),
-    )
-    return { runId, runDir, status, submissionSha256 }
+      const exec = await execInChild(cfgFile, opts.budgetWallMs ?? task.budget.wall_ms ?? 120_000)
+      rmSync(cfgFile, { force: true })
+
+      const summary: ExecSummary | null = existsSync(join(runDir, 'exec-summary.json'))
+        ? (JSON.parse(readFileSync(join(runDir, 'exec-summary.json'), 'utf8')) as ExecSummary)
+        : null
+
+      if (summary) {
+        writeFileSync(
+          join(runDir, 'ops.jsonl'),
+          summary.ops.map((op) => JSON.stringify(op)).join('\n') + (summary.ops.length ? '\n' : ''),
+        )
+        status = summary.status === 'succeeded' ? 'succeeded' : summary.status === 'failed' ? 'failed' : 'error'
+        failure = summary.error
+      } else if (exec.timedOut) {
+        status = 'timeout'
+        failure = '墙钟超时，已硬杀进程组'
+      } else if (exec.code !== 0) {
+        failure = exec.stderr.trim() || '子进程退出码 ' + String(exec.code)
+      }
+    }
+  } catch (err) {
+    failure = err instanceof Error ? err.message : String(err)
+  }
+
+  // 提交 = 结束那一刻工作区的快照，整棵拷、不过滤：漏掉任何一个目录，
+  // 都等于给 agent 留了一块"改了也不算"的地方。先落快照、再算哈希，之后只认这个哈希。
+  try {
+    cpSync(workspace, artifact, { recursive: true })
   } finally {
     rmSync(workspace, { recursive: true, force: true })
   }
+  submissionSha256 = hashTree(artifact).sha256
+
+  // 失败的跑也留记录：否则「没交东西」和「跑挂了」在目录里长得一样，都是空。
+  const finishedAt = new Date()
+  writeFileSync(
+    join(runDir, 'run.json'),
+    JSON.stringify(
+      {
+        schema_version: 1,
+        run_id: runId,
+        task_id: task.id,
+        system: { harness: 'none@0', model: opts.system },
+        seed: opts.seed,
+        repeat_index: opts.repeat,
+        started_at: startedAt.toISOString(),
+        finished_at: finishedAt.toISOString(),
+        status,
+        submission: { path: 'artifact/', sha256: submissionSha256 },
+        framework: { maa_node: maaNodeVersion() },
+        task_file: taskFile,
+        error: failure,
+        wall_ms: finishedAt.getTime() - started,
+      },
+      null,
+      2,
+    ),
+  )
+  return { runId, runDir, status, submissionSha256, ...(failure === undefined ? {} : { error: failure }) }
 }
 
 /** MaaFW 版本进 run.json：同一批分数必须能看出框架版本，否则跨版本不可比。 */

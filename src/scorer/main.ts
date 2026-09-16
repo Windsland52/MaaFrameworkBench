@@ -139,21 +139,25 @@ function countOps(ops: Array<Record<string, unknown>>, op: string): number {
   return ops.filter((o) => o.op === op).length
 }
 
-/** 答案是不是画面里的那个值：只看识别结果，不看 agent 自己的话。 */
+/**
+ * 答案是不是画面里的那个值：只看识别结果，不看 agent 自己的话。
+ *
+ * 不写 node 时扫全部节点的识别结果 —— 题面没约定过节点名，判它叫什么就不公平：
+ * 同一份正确的产出，换个命名就挂，那判的是实现风格不是业务达成。
+ */
 function judgeRecoText(assert: AssertSpec & { kind: 'reco_text' }, ev: Evidence): AssertResult {
   const texts = ev.events
-    .filter((e) => e.msg === 'Recognition.Succeeded' && e.name === assert.node)
+    .filter((e) => e.msg === 'Recognition.Succeeded' && (assert.node === undefined || e.name === assert.node))
     .map((e) => (typeof e.text === 'string' ? e.text : null))
     .filter((t): t is string => t !== null)
   const ok = texts.includes(assert.equals)
+  const who = assert.node ?? '任一节点'
+  const seen = [...new Set(texts)].map((t) => JSON.stringify(t)).join(', ')
   return {
     kind: 'reco_text',
     ok,
     detail:
-      assert.node +
-      ' 识别到 ' +
-      (texts.length === 0 ? '（无）' : texts.map((t) => JSON.stringify(t)).join(', ')) +
-      (ok ? '' : '，期望 ' + JSON.stringify(assert.equals)),
+      who + ' 识别到 ' + (texts.length === 0 ? '（无）' : seen) + (ok ? '' : '，期望 ' + JSON.stringify(assert.equals)),
   }
 }
 

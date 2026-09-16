@@ -5,6 +5,12 @@ dist/
 tmp/
 runs/
 
-# 数据集落地目录与依赖：由 datasets.yaml 声明，npm run fetch 拉取
+# 数据集落地目录与依赖：由 datasets.yaml 声明，pnpm datasets 拉取
 data/
 vendor/
+
+# 任务包里不放画面：帧来自 datasets.yaml 的 images 包（落 data/），
+# task.yaml 的 visible / env.screens 是声明，不是帧的副本。主仓不放二进制。
+tasks/**/*.png
+tasks/**/*.jpg
+tasks/**/*.jpeg

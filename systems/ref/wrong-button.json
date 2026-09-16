@@ -1,0 +1,18 @@
+{
+  "Main.Start": {
+    "recognition": "OCR",
+    "expected": ["STOCK"],
+    "action": "Click",
+    "target": [980, 370],
+    "next": ["Main.AtInventory"]
+  },
+  "Main.AtInventory": {
+    "recognition": "OCR",
+    "expected": ["INVENTORY"],
+    "next": ["Main.Quantity"]
+  },
+  "Main.Quantity": {
+    "recognition": "OCR",
+    "expected": ["12"]
+  }
+}
