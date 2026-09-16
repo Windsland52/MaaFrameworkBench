@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+tmp/
+runs/
+
+# 数据集落地目录与依赖：由 datasets.yaml 声明，npm run fetch 拉取
+data/
+vendor/

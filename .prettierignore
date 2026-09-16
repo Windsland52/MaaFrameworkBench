@@ -1,0 +1,9 @@
+# 依赖与数据（由 datasets.yaml 拉取，不进 git）
+node_modules/
+vendor/
+data/
+
+# 工具生成
+pnpm-lock.yaml
+runs/
+*.log
