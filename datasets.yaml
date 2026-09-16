@@ -1,0 +1,31 @@
+# 数据集清单 —— 主仓只放这个文件，二进制一律不进 git
+#
+# 为什么不在仓里：二进制进历史后永久占位；独立成包还可下架、可单独分发。
+# 用法：npm run fetch -- <id> [<id>...]   或   npm run fetch -- --all
+#
+# kind 说明（当前只实现 dependency，其余等真正需要时再加）：
+#   dependency —— 运行依赖，落到 vendor/
+#   images     —— 静态图片包（识别类任务用）
+#   recording  —— 真实录制包（操作序列 + 逐帧图 + 事件流）
+#   env        —— 交互环境包（网页标本应用）
+#   log        —— 日志包
+
+defaults:
+  data_root: data
+
+datasets:
+  ocr-ppocrv6-small:
+    kind: dependency
+    target: vendor/ocr
+    license: MIT
+    note: PP-OCRv6/small，单模型多语言（简中/繁中/英/日 + 46 种拉丁语系）
+    base_url: https://raw.githubusercontent.com/MaaXYZ/MaaCommonAssets/dabcd4681ac990dc4361de26416d986abd80e4aa/OCR/ppocr_v6/small
+    files:
+      - name: det.onnx
+        sha256: 66c0f34caaf432553710fd9973a7134d8cf924db7109310c3d2562dcc39b209d
+      - name: rec.onnx
+        sha256: 7dcf6298d77d2a6eb44c1ebeed990826ca895a9c68d955a3eace00763d052949
+      - name: keys.txt
+        sha256: b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d
+      - name: README.md
+        sha256: f32bfb344084554b90650c33866ce21e4995cedd533754d1be27f0978a190312
