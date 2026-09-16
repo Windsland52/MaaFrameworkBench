@@ -9,10 +9,12 @@
     "node": ">=24"
   },
   "scripts": {
+    "bench": "node scripts/bench.ts",
     "datasets": "node scripts/fetch-dataset.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify": "node scripts/verify-loop.ts"
   },
   "dependencies": {
     "@maaxyz/maa-node": "^5.13.0"
