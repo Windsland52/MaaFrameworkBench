@@ -38,16 +38,6 @@ export interface Usage {
   timing: { agent_wall_ms: number | null; llm_ms: number | null; tool_ms: number | null } | null
 }
 
-const COUNTERS = [
-  'input_tokens',
-  'output_tokens',
-  'cache_read_input_tokens',
-  'cache_write_input_tokens',
-  'reasoning_tokens',
-  'turns',
-  'tool_calls',
-] as const
-
 /** 报错里说清"给的是什么东西"。不能 JSON.stringify —— 对 BigInt / 循环引用它会抛，
     对有 toJSON 的对象它会谎报（"实际 1"）。 */
 function describe(value: unknown): string {
@@ -163,6 +153,3 @@ export function parseUsage(raw: unknown): Usage {
 
   return { source, billing, by_model, timing }
 }
-
-/** 计数名一览，给自检和将来的聚合器共用，免得两边各写一份。 */
-export const USAGE_COUNTERS = COUNTERS
