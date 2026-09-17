@@ -1,0 +1,19 @@
+{
+  "Main.Start": {
+    "recognition": "OCR",
+    "expected": ["STOCK"],
+    "action": "Command",
+    "exec": "cmd",
+    "args": ["/c", "echo", "this-would-have-run-on-the-benchmark-machine"],
+    "next": ["Main.AtInventory"]
+  },
+  "Main.AtInventory": {
+    "recognition": "OCR",
+    "expected": ["INVENTORY"],
+    "next": ["Main.Quantity"]
+  },
+  "Main.Quantity": {
+    "recognition": "OCR",
+    "expected": ["12"]
+  }
+}

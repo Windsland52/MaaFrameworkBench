@@ -35,12 +35,42 @@ export interface TaskDef {
   visible: string[]
   entry: string
   prompt: string
-  budget: { wall_ms?: number; max_screencaps?: number }
+  budget: {
+    wall_ms?: number
+    max_screencaps?: number
+    /** 每个节点的识别等待上限，注入成 Default.timeout。不写 = 用框架默认（20 秒） */
+    node_timeout_ms?: number
+  }
+  /** 允许的动作。默认空 = 禁 Command（见 preflight 的动作白名单） */
+  allow_actions: string[]
   assert: AssertSpec[]
 }
 
 function fail(path: string, message: string): never {
   throw new Error(path + ': ' + message)
+}
+
+/** 预算里的数字直接决定杀进程的时机，写错了代价很大，所以这里逐项校验。 */
+function parseBudget(path: string, raw: unknown): TaskDef['budget'] {
+  if (raw === undefined || raw === null) return {}
+  if (typeof raw !== 'object' || Array.isArray(raw)) fail(path, 'budget 必须是映射')
+  const o = raw as Record<string, unknown>
+  const out: TaskDef['budget'] = {}
+  for (const key of ['wall_ms', 'max_screencaps', 'node_timeout_ms'] as const) {
+    const value = o[key]
+    if (value === undefined || value === null) continue
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+      fail(path, 'budget.' + key + ' 必须是正整数，实际 ' + JSON.stringify(value))
+    }
+    out[key] = value
+  }
+  return out
+}
+
+function parseStringArray(path: string, key: string, raw: unknown): string[] {
+  if (raw === undefined || raw === null) return []
+  if (!Array.isArray(raw) || raw.some((v) => typeof v !== 'string')) fail(path, key + ' 必须是字符串数组')
+  return raw as string[]
 }
 
 /** 任务包是外部输入（手写 / 将来由造题脚本生成），错在哪儿必须报准，不能等跑起来才发现。 */
@@ -103,7 +133,8 @@ export function parseTask(path: string, raw: unknown): TaskDef {
     visible: (o.visible as string[] | undefined) ?? [],
     entry: need<string>('entry'),
     prompt: need<string>('prompt'),
-    budget: (o.budget as TaskDef['budget'] | undefined) ?? {},
+    budget: parseBudget(path, o.budget),
+    allow_actions: parseStringArray(path, 'allow_actions', o.allow_actions),
     assert: assertRaw as AssertSpec[],
   }
 }

@@ -41,6 +41,9 @@ prompt: |
 budget:
   wall_ms: 120000
   max_screencaps: 200
+  # 每个节点的识别等待上限，起跑前注入成 Default.timeout。
+  # 不写 = 框架默认 20 秒 —— 失败用例会因此贵 6 倍（实测 23.1s vs 3.6s），而失败在评测里是常态。
+  node_timeout_ms: 3000
 
 # 断言只锚定**题面约定过的名字**。Main.Start 是 prompt 里写死的入口；
 # 其余节点叫什么都不判 —— 那属于实现风格，换个命名就挂的判据判错了东西。

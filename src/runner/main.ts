@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hashFile, hashTree } from './hash.ts'
-import { preflightPipeline } from './preflight.ts'
+import { parseLooseJson, preflightPipeline, scanForbiddenActions } from './preflight.ts'
 import { parseUsage, type Usage } from './usage.ts'
 import { OCR_MODEL_DIR, REPO_ROOT } from './root.ts'
 import { loadTask, type TaskDef } from './task.ts'
@@ -99,6 +99,33 @@ function materialize(task: TaskDef, dest: string, repoRoot: string): void {
   }
 }
 
+/**
+ * 把任务规定的默认值写进资源包。**必须在 post_bundle 之前写** ——
+ * 实测：Default 是在加载时合并进每个节点的，事后再 override_pipeline 完全没用
+ * （走错按钮那例：不注入 22 次识别 / 22s，注入 5 次 / 4.5s）。
+ *
+ * 写在 agent 用的那个文件名上：框架 .jsonc 优先于 .json，写错文件我们的值会被它盖掉。
+ * 只动 Default 的这一个键，agent 原有的默认值保留。返回注入的内容，好写进 run.json ——
+ * 没有它，同一份 artifact 重跑不出同一次 run。
+ */
+function applyHarnessDefaults(bundle: string, task: TaskDef): Record<string, unknown> | undefined {
+  const timeout = task.budget.node_timeout_ms
+  if (timeout === undefined) return undefined
+
+  const jsonc = join(bundle, 'default_pipeline.jsonc')
+  const json = join(bundle, 'default_pipeline.json')
+  const target = existsSync(jsonc) ? jsonc : json
+  const isObject = (v: unknown): v is Record<string, unknown> =>
+    typeof v === 'object' && v !== null && !Array.isArray(v)
+
+  const base = existsSync(target) ? (parseLooseJson(readFileSync(target, 'utf8')) as unknown) : {}
+  const root = isObject(base) ? base : {}
+  const dflt = isObject(root.Default) ? root.Default : {}
+  const merged = { ...root, Default: { ...dflt, timeout } }
+  writeFileSync(target, JSON.stringify(merged, null, 2))
+  return { Default: { timeout } }
+}
+
 async function execInChild(
   cfgFile: string,
   wallMs: number,
@@ -155,6 +182,7 @@ export async function runTask(taskId: string, opts: RunOptions): Promise<RunResu
   let status: RunResult['status'] = 'error'
   let submissionSha256 = ''
   let failure: string | undefined
+  let harnessDefaults: Record<string, unknown> | undefined
   try {
     materialize(task, workspace, repoRoot)
     if (opts.pipelineFrom) {
@@ -164,10 +192,19 @@ export async function runTask(taskId: string, opts: RunOptions): Promise<RunResu
     }
 
     const bundle = join(workspace, 'resource', 'base')
-    const problems = preflightPipeline(bundle, task.entry)
+    // 结构检查 + 动作白名单：两者都不过就不起进程。动作检查放在最前，
+    // 因为它挡的是"在跑评测的机器上执行任意程序"，不该等到跑起来才发现。
+    const problems = [...scanForbiddenActions(bundle, task.allow_actions), ...preflightPipeline(bundle, task.entry)]
+    // **提交就在这里冻结**：再往后工作区既会被注入（harness 默认值）、又会被跑。
+    // 先拍快照再注入，artifact 就只是"我们收到的那份东西"，而不是被动过手脚的版本。
+    // 工作区本身要留到跑完（子进程从它加载资源包），所以在 finally 里才收。
+    cpSync(workspace, artifact, { recursive: true })
+    submissionSha256 = hashTree(artifact).sha256
+
     if (problems.length > 0) {
       failure = '提交不合规: ' + problems.join('；')
     } else {
+      harnessDefaults = applyHarnessDefaults(bundle, task)
       const screens =
         task.env.type === 'frames'
           ? task.env.screens.map((s) => ({ ...s, path: sourcePath(repoRoot, task, s.path) }))
@@ -218,15 +255,6 @@ export async function runTask(taskId: string, opts: RunOptions): Promise<RunResu
     failure = err instanceof Error ? err.message : String(err)
   }
 
-  // 提交 = 结束那一刻工作区的快照，整棵拷、不过滤：漏掉任何一个目录，
-  // 都等于给 agent 留了一块"改了也不算"的地方。先落快照、再算哈希，之后只认这个哈希。
-  try {
-    cpSync(workspace, artifact, { recursive: true })
-  } finally {
-    rmSync(workspace, { recursive: true, force: true })
-  }
-  submissionSha256 = hashTree(artifact).sha256
-
   // 账在跑完之后补：它是这次 run 的附带事实，坏掉不该影响已经测到的东西。
   let usage: Usage | undefined
   let usageError: string | undefined
@@ -268,6 +296,8 @@ export async function runTask(taskId: string, opts: RunOptions): Promise<RunResu
         wall_ms: finishedAt.getTime() - started,
         // 被测系统自报的：拿不到就整个缺省，不做空壳
         ...(usage === undefined ? {} : { usage }),
+        // 我们注入进包里的默认值：没有它，同一份 artifact 重跑不出同一次 run
+        ...(harnessDefaults === undefined ? {} : { harness_defaults: harnessDefaults }),
         ...(usageFile === undefined ? {} : { usage_file: usageFile }),
         ...(usageError === undefined ? {} : { usage_error: usageError }),
       },

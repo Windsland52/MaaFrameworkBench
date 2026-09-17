@@ -80,6 +80,9 @@ prompt: |                       # 给 agent 看的题面
 budget:                         # 超限即 run 失败
   wall_ms: 120000
   max_screencaps: 200
+  node_timeout_ms: 3000         # 每个节点的识别等待上限，起跑前注入成 Default.timeout
+
+allow_actions: []               # 额外放行的动作；默认空 = 禁 Command（见 §7）
 
 assert:                         # 判据（行为断言，held-out）
   - kind: env_state
@@ -146,11 +149,17 @@ runs/<run_id>/
   "finished_at": "2026-09-15T12:00:42Z",
   "status": "succeeded",
   "submission": { "path": "artifact/", "sha256": "..." },
-  "framework": { "maa_node": "5.13.0", "maafw_tag": "v5.13.0" }
+  "framework": { "maa_node": "5.13.0", "maafw_tag": "v5.13.0" },
+  "harness_defaults": { "Default": { "timeout": 3000 } }
 }
 ```
 
 `status` 取 `succeeded | failed | timeout | error` —— **这只是"跑完了没有"，不是"做对了没有"**。做对没有看 `score.json`。
+
+**提交在注入之前就冻结。** `harness_defaults` 是执行器写进资源包的默认值（目前只有
+`Default.timeout`，来自 `budget.node_timeout_ms`）—— 框架在**加载时**把 Default 合并进每个节点，
+所以它只能写进包里再加载，事后再 override 不生效。注入会改工作区，因此快照先拍、注入后做：
+`artifact/` 永远只是"收到的那份东西"。要让一次 run 可复现，需要 `artifact/` + 这个字段两样。
 
 ### 账：`usage` / `timing`（被测系统自报）
 

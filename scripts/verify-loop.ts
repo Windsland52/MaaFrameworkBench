@@ -27,6 +27,8 @@ interface Case {
   /** 期望具体哪几条断言不过（空的表示不该有断言失败） */
   expectFailing?: string[]
   budgetWallMs?: number
+  /** 期望 run.json 的 error 里含这段字（用来证明"被拦下"而不是"跑挂了"） */
+  expectErrorIncludes?: string
 }
 
 const cases: Case[] = [
@@ -47,6 +49,14 @@ const cases: Case[] = [
     repeat: 3,
     expectPass: false,
     expectFailing: ['reco_text'], // 同理：进入库存页那步是命中的，挂的是没读到数量
+  },
+  {
+    name: '提交里藏 Command 动作（必须在起进程前拦下）',
+    pipeline: 'systems/ref/command.json',
+    repeat: 10,
+    expectPass: false,
+    expectFailing: ['env_state', 'node_hit', 'reco_text'],
+    expectErrorIncludes: '被禁止的动作 Command',
   },
   {
     name: '跑不完（墙钟 400ms）',
@@ -173,7 +183,9 @@ for (const c of cases) {
     .map((a) => a.kind)
     .sort()
   const want = (c.expectFailing ?? []).slice().sort()
-  const ok = scored.passed === c.expectPass && failing.join(',') === want.join(',')
+  const runText = readFileSync(resolve(result.runDir, 'run.json'), 'utf8')
+  const errorOk = c.expectErrorIncludes === undefined ? true : runText.includes(c.expectErrorIncludes)
+  const ok = scored.passed === c.expectPass && failing.join(',') === want.join(',') && errorOk
   if (!ok) failures += 1
   console.log(
     (ok ? 'OK  ' : 'FAIL') +
