@@ -37,11 +37,10 @@ datasets:
     note: 合成标本画面（1280x720），由脚本确定性生成，不是真实设备采集
     generate: scripts/generate-frames.ts
     files:
-      # 文件名按 MaaFW 自己的截图规范（MaaUtils/Time.hpp 的 format_now_for_filename）：
-      # 语义化的名字会替 agent 做判断，真实截图流只有时间戳
-      - name: 2026.09.18-21.07.41.318.png
+      # 数据集里的名字是给人看的，要有语义；交付给 agent 时的名字在 task.yaml 的 captured_at
+      - name: home.png
         sha256: 84434ad909bc95251e11d92bec07f9043e39e950b592e40cc43759cee8e01aac
-      - name: 2026.09.18-21.07.46.902.png
+      - name: inventory.png
         sha256: 8af105988d252c2b9eb2c2be9d21760d5d28ac48300ed815a87c10b95c610eaa
-      - name: 2026.09.18-21.07.52.477.png
+      - name: inventory-zero.png
         sha256: 640711b490fd8d3d744dd2cc97a53d29439982601594ff4c23b159d04a7e4260

@@ -60,17 +60,20 @@ env:
   dir: maafw-demo-frames        # 数据集目录名（相对 data_root）
   screens:                      # 画面序列；第一屏是初始画面
     - name: home                # 屏名，也是 env_state 断言能取的值
-      path: 2026.09.18-21.07.41.318.png   # 数据集内的文件名（按 MaaFW 截图规范命名）
+      path: home.png            # 数据集内的文件名 —— 给人查问题看，要有语义
+      captured_at: 2026.09.18-21.07.41.318.png   # 交付进工作区时的名字 —— 按 MaaFW 截图规范
       transitions:              # 输入落进矩形就切屏；不声明则画面不变
         - area: [140, 300, 320, 140]
           target: inventory
     - name: inventory
-      path: 2026.09.18-21.07.46.902.png
+      path: inventory.png
+      captured_at: 2026.09.18-21.07.46.902.png
       transitions:
         - area: [1040, 480, 320, 140]
           target: home
     - name: inventory-zero      # held-out 变体：环境里可达，绝不物化进工作区
-      path: 2026.09.18-21.07.52.477.png
+      path: inventory-zero.png
+      captured_at: 2026.09.18-21.07.52.477.png
   # replay 用 recording 包；web 的配置字段等它落地再定
 
 entry: Main.Start               # 跑哪个入口节点
@@ -96,7 +99,7 @@ assert:                         # 判据（行为断言，held-out）
   - kind: op_count
     max_screencaps: 30          # 效率项（对应 4.2.1）
 
-visible: [2026.09.18-21.07.41.318.png]   # 物化进 agent 工作区 frames/ 的帧；其余帧只在环境里
+visible: [home.png]             # 物化进 agent 工作区 frames/ 的帧（交付时改名为该屏的 captured_at）
 ```
 
 **断言种类（v1.1 四种）**

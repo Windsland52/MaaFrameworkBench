@@ -9,19 +9,22 @@ env:
   dir: maafw-demo-frames # datasets.yaml 的 target，相对 data_root
   screens:
     - name: home
-      path: 2026.09.18-21.07.41.318.png
+      path: home.png # 数据集里的名字：给我们查问题看
+      captured_at: 2026.09.18-21.07.41.318.png # 交付进 agent 工作区时的名字：按 MaaFW 截图规范，不该有语义
       transitions:
         - area: [140, 300, 320, 140] # STOCK 按钮
           target: inventory
     - name: inventory
-      path: 2026.09.18-21.07.46.902.png
+      path: inventory.png
+      captured_at: 2026.09.18-21.07.46.902.png
       transitions:
         - area: [1040, 480, 320, 140] # BACK 按钮
           target: home
     - name: inventory-zero
-      path: 2026.09.18-21.07.52.477.png # held-out 变体：同屏、数量不同
+      path: inventory-zero.png # held-out 变体：同屏、数量不同
+      captured_at: 2026.09.18-21.07.52.477.png
 
-visible: [2026.09.18-21.07.41.318.png] # 数据集里的帧；物化到工作区的 frames/ 下
+visible: [home.png] # 数据集里的帧；物化到工作区 frames/ 时改名为该屏的 captured_at
 entry: Main.Start
 
 prompt: |

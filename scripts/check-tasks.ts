@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { REPO_ROOT } from '../src/runner/root.ts'
-import { loadTask } from '../src/runner/task.ts'
+import { deliveredPath, loadTask } from '../src/runner/task.ts'
 
 /**
  * 工作区不带评测痕迹。
@@ -65,11 +65,13 @@ for (const taskId of taskIds) {
     if (hit !== undefined) problems.push(relative(REPO_ROOT, file) + ' 里出现「' + hit + '」')
   }
 
-  // 2. visible 的文件名不许撞上任何一屏的名字 —— 文件名替 agent 做映射
+  // 2. **交付进工作区之后**的名字不许撞上任何一屏的名字 —— 文件名替 agent 做映射。
+  //    查的是交付名而不是 visible 原文：数据集里的名字本来就该有语义（给我们看的）。
   const screenNames = task.env.type === 'frames' ? task.env.screens.map((s) => s.name) : []
   for (const v of task.visible) {
-    const hit = screenNames.find((n) => v.toLowerCase().includes(n.toLowerCase()))
-    if (hit !== undefined) problems.push('visible 的「' + v + '」里含屏名「' + hit + '」')
+    const delivered = deliveredPath(task, v)
+    const hit = screenNames.find((n) => delivered.toLowerCase().includes(n.toLowerCase()))
+    if (hit !== undefined) problems.push('交付进工作区的「' + delivered + '」里含屏名「' + hit + '」')
   }
 
   report(

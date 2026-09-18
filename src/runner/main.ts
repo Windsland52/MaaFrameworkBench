@@ -9,7 +9,7 @@ import { envIdentity, scorerIdentity, taskIdentity } from './identity.ts'
 import { parseLooseJson, preflightPipeline, scanForbiddenActions } from './preflight.ts'
 import { parseUsage, type Usage } from './usage.ts'
 import { OCR_MODEL_DIR, REPO_ROOT } from './root.ts'
-import { loadTask, type TaskDef } from './task.ts'
+import { deliveredPath, loadTask, type TaskDef } from './task.ts'
 
 const CHILD = resolve(dirname(fileURLToPath(import.meta.url)), 'child.ts')
 
@@ -77,10 +77,7 @@ function materialize(task: TaskDef, dest: string, repoRoot: string): void {
   for (const visible of task.visible) {
     const src = sourcePath(repoRoot, task, visible)
     if (!existsSync(src)) throw new Error('visible 不在: ' + visible + ' -> ' + src)
-    // 目录形式（tasks/.../visible/ 以 / 结尾）复制进去，文件形式直接落到目标名
-    const out = visible.startsWith('tasks/')
-      ? join(dest, visible.replace(/^tasks\/[^/]+\//, ''))
-      : join(dest, 'frames', visible)
+    const out = join(dest, deliveredPath(task, visible))
     const isDir = statSync(src).isDirectory() && (visible.endsWith('/') || !visible.includes('.'))
     if (isDir) {
       mkdirSync(out, { recursive: true })
