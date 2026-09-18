@@ -41,6 +41,14 @@ const cases: Case[] = [
     repeat: 7,
     expectPass: true,
   },
+  // 形状完全不同的另一种写法：4 个节点（多一步读标签）、显式 ROI、命名也不同。
+  // 它必须过 —— 判分不看产出长得像不像参照实现，只看行为与事实。
+  {
+    name: '另一种写法（4 节点 + 显式 ROI）',
+    pipeline: 'tasks/t001-enter-inventory/fixtures/different-shape.json',
+    repeat: 11,
+    expectPass: true,
+  },
   {
     name: '点错按钮（点在不响应的地方）',
     pipeline: 'tasks/t001-enter-inventory/fixtures/wrong-button.json',

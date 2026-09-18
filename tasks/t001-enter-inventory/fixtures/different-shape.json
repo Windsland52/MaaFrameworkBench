@@ -1,0 +1,26 @@
+{
+  "Main.Start": {
+    "recognition": "OCR",
+    "roi": [100, 250, 400, 240],
+    "expected": ["STOCK"],
+    "action": "Click",
+    "next": ["Page.Check"]
+  },
+  "Page.Check": {
+    "recognition": "OCR",
+    "roi": [0, 0, 640, 120],
+    "expected": ["INVENTORY"],
+    "next": ["Read.Label"]
+  },
+  "Read.Label": {
+    "recognition": "OCR",
+    "roi": [80, 180, 400, 80],
+    "expected": ["THE QUANTITY"],
+    "next": ["Read.Value"]
+  },
+  "Read.Value": {
+    "recognition": "OCR",
+    "roi": [80, 260, 400, 160],
+    "expected": ["12"]
+  }
+}
