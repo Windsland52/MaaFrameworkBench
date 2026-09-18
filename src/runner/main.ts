@@ -59,7 +59,7 @@ interface ExecSummary {
  * 任务包里的路径：以 tasks/ 开头相对仓库根，其余相对数据集目录。
  * 数据集目录由 task.yaml 的 env 声明，这里不猜。
  */
-function sourcePath(repoRoot: string, task: TaskDef, declared: string): string {
+export function sourcePath(repoRoot: string, task: TaskDef, declared: string): string {
   if (declared.split('/').includes('..')) throw new Error('可见文件路径不能含 ..: ' + declared)
   if (declared.startsWith('tasks/')) return resolve(repoRoot, declared)
   const datasetDir = task.env.type === 'frames' ? task.env.dir : ''
@@ -75,7 +75,7 @@ function sourcePath(repoRoot: string, task: TaskDef, declared: string): string {
  *
  * 刻意**不**留任何来源说明：SOURCE.json 这种东西只有评测才会有。要交代的写进题面。
  */
-function materialize(task: TaskDef, dest: string, repoRoot: string): void {
+export function materialize(task: TaskDef, dest: string, repoRoot: string): void {
   const seed = resolve(repoRoot, 'tasks', task.id, 'seed')
   if (existsSync(seed)) cpSync(seed, dest, { recursive: true })
 }

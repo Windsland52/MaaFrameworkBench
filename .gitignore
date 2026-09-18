@@ -5,6 +5,9 @@ dist/
 tmp/
 runs/
 
+# 自测沙盒：摊出来的工作区 + 设备交出的图（自测草稿，不进库）
+sandbox/
+
 # 数据集落地目录与依赖：由 datasets.yaml 声明，pnpm datasets 拉取
 data/
 vendor/
