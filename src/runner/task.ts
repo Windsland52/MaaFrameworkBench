@@ -1,20 +1,18 @@
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { extname, resolve } from 'node:path'
 import { load } from 'js-yaml'
 
 /**
  * 一屏的声明。transitions 表示点进矩形就切到 target；不声明则输入不改变画面。
  *
- * 一屏有三个名字，各服务一个读者：
- *   name         断言用（`env_state: equals: home`）—— held-out
- *   path         数据集里的文件名 —— 给人查问题看
- *   captured_at  交付进 agent 工作区时的文件名（按 MaaFW 截图规范）—— agent 看的
+ * 一屏有两个名字，各服务一个读者：
+ *   name  断言用（`env_state: equals: home`），也是给人看的那个 —— held-out
+ *   path  数据集里的文件名 —— 给环境加载用，也不进 agent 的工作区
  */
 export interface TaskScreen {
   name: string
   path: string
-  /** 物化进工作区时用的名字，形如 2026.09.18-21.07.41.318.png */
-  captured_at?: string
   transitions?: Array<{ area: [number, number, number, number]; target: string }>
 }
 
@@ -151,15 +149,20 @@ export function parseTask(path: string, raw: unknown): TaskDef {
 /**
  * `visible` 里的一项在**工作区**里叫什么。
  *
- * 数据集帧交付时按该屏声明的 `captured_at` 改名（数据集里的名字有语义，是给我们查问题看的；
- * 工作区里那份不该有语义）；任务包自己的文件保持相对路径。
+ * 数据集帧落进 `frames/` 时**推一个不带语义的名字**：文件名替 agent 做映射，
+ * 等于替它做了识别。所以不手写、也不声明 —— 由数据集里的名字推出来，
+ * 每个都推得出同一个值（帧本身是数据，名字不是别人要维护的第二份）。
  *
+ * 与"按当时时间命名"无关：那是 controller 把图交出去时的运行时行为
+ * （MaaFW 自己保存截图就用 `format_now_for_filename`），不落到这份素材上。
+ *
+ * 任务包自己的文件保持相对路径（去掉 `tasks/<id>/` 那一层）。
  * 物化与痕迹检查共用这一个规则 —— 规则写两遍，早晚有一遍是错的。
  */
-export function deliveredPath(task: TaskDef, visible: string): string {
+export function deliveredPath(visible: string): string {
   if (visible.startsWith('tasks/')) return visible.replace(/^tasks\/[^/]+\//, '')
-  const screen = task.env.type === 'frames' ? task.env.screens.find((s) => s.path === visible) : undefined
-  return 'frames/' + (screen?.captured_at ?? visible)
+  const digest = createHash('sha256').update(visible).digest('hex').slice(0, 12)
+  return 'frames/' + digest + extname(visible)
 }
 
 export function loadTask(repoRoot: string, taskId: string): { task: TaskDef; taskFile: string } {

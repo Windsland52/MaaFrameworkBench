@@ -65,11 +65,12 @@ for (const taskId of taskIds) {
     if (hit !== undefined) problems.push(relative(REPO_ROOT, file) + ' 里出现「' + hit + '」')
   }
 
-  // 2. **交付进工作区之后**的名字不许撞上任何一屏的名字 —— 文件名替 agent 做映射。
-  //    查的是交付名而不是 visible 原文：数据集里的名字本来就该有语义（给我们看的）。
+  // 2. 交付进工作区的名字不许撞上任何一屏的名字 —— 文件名替 agent 做映射。
+  //    现在的交付名是 deliveredPath 推出来的 token，本来不可能带语义；
+  //    这条守着的是**那个推导别哪天被改回去**（改回"直接拿数据集名字交付"就当场红）。
   const screenNames = task.env.type === 'frames' ? task.env.screens.map((s) => s.name) : []
   for (const v of task.visible) {
-    const delivered = deliveredPath(task, v)
+    const delivered = deliveredPath(v)
     const hit = screenNames.find((n) => delivered.toLowerCase().includes(n.toLowerCase()))
     if (hit !== undefined) problems.push('交付进工作区的「' + delivered + '」里含屏名「' + hit + '」')
   }

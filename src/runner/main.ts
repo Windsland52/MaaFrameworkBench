@@ -77,7 +77,7 @@ function materialize(task: TaskDef, dest: string, repoRoot: string): void {
   for (const visible of task.visible) {
     const src = sourcePath(repoRoot, task, visible)
     if (!existsSync(src)) throw new Error('visible 不在: ' + visible + ' -> ' + src)
-    const out = join(dest, deliveredPath(task, visible))
+    const out = join(dest, deliveredPath(visible))
     const isDir = statSync(src).isDirectory() && (visible.endsWith('/') || !visible.includes('.'))
     if (isDir) {
       mkdirSync(out, { recursive: true })

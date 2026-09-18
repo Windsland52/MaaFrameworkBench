@@ -8,23 +8,22 @@ env:
   dataset: maafw-demo-frames # 环境自带画面；agent 看不到全部
   dir: maafw-demo-frames # datasets.yaml 的 target，相对 data_root
   screens:
+    # path 只是数据集里的文件名（给环境和我们看）；交付进工作区 frames/ 时会推成
+    # 一个不带语义的名字，所以这里不用、也不该写第二个名字
     - name: home
-      path: home.png # 数据集里的名字：给我们查问题看
-      captured_at: 2026.09.18-21.07.41.318.png # 交付进 agent 工作区时的名字：按 MaaFW 截图规范，不该有语义
+      path: home.png
       transitions:
         - area: [140, 300, 320, 140] # STOCK 按钮
           target: inventory
     - name: inventory
       path: inventory.png
-      captured_at: 2026.09.18-21.07.46.902.png
       transitions:
         - area: [1040, 480, 320, 140] # BACK 按钮
           target: home
     - name: inventory-zero
       path: inventory-zero.png # held-out 变体：同屏、数量不同
-      captured_at: 2026.09.18-21.07.52.477.png
 
-visible: [home.png] # 数据集里的帧；物化到工作区 frames/ 时改名为该屏的 captured_at
+visible: [home.png] # 数据集里的帧；物化进工作区 frames/（交付名由 deliveredPath 推）
 entry: Main.Start
 
 prompt: |

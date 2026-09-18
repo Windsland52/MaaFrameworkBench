@@ -2,6 +2,7 @@
 
 > 日期：2026-09-15 · 状态：**冻结**（改动需显式记版本）
 > v1.1（2026-09-16）：断言加 `reco_text`；`frames` 的屏序列、`ops.jsonl` 字段按实测补全
+> v1.2（2026-09-18）：屏的第二个名字 captured_at 拿掉 —— 交付名不手写，由 `deliveredPath` 从数据集里的名字推出来
 > 目的：让"重开会话"和"上团队"都成立 —— 后续所有工作只依赖本文 + `MaaFrameworkBench-设计定稿-2026-09-15.md`
 > 已实测的实施事实见文末。
 
@@ -46,6 +47,10 @@ tasks/<task_id>/
 `visible` 里的帧物化进工作区 `frames/`（相当于"你能看到的屏幕"），
 其余帧（held-out 变体）只在环境进程里可达，绝不进工作区。
 
+**交付名不带语义，而且不是手写的。** 数据集里的帧名是给环境和我们看的；工作区里那份由
+`deliveredPath` 从数据集里的名字推出来 —— 文件名替 agent 做映射，等于替它做了识别，
+所以它是个推出来的 token，不是谁要维护的第二份名字。屏的可读身份是 `env.screens[].name`（held-out）。
+
 ### task.yaml
 
 ```yaml
@@ -61,19 +66,16 @@ env:
   screens:                      # 画面序列；第一屏是初始画面
     - name: home                # 屏名，也是 env_state 断言能取的值
       path: home.png            # 数据集内的文件名 —— 给人查问题看，要有语义
-      captured_at: 2026.09.18-21.07.41.318.png   # 交付进工作区时的名字 —— 按 MaaFW 截图规范
       transitions:              # 输入落进矩形就切屏；不声明则画面不变
         - area: [140, 300, 320, 140]
           target: inventory
     - name: inventory
       path: inventory.png
-      captured_at: 2026.09.18-21.07.46.902.png
       transitions:
         - area: [1040, 480, 320, 140]
           target: home
     - name: inventory-zero      # held-out 变体：环境里可达，绝不物化进工作区
       path: inventory-zero.png
-      captured_at: 2026.09.18-21.07.52.477.png
   # replay 用 recording 包；web 的配置字段等它落地再定
 
 entry: Main.Start               # 跑哪个入口节点
@@ -99,7 +101,7 @@ assert:                         # 判据（行为断言，held-out）
   - kind: op_count
     max_screencaps: 30          # 效率项（对应 4.2.1）
 
-visible: [home.png]             # 物化进 agent 工作区 frames/ 的帧（交付时改名为该屏的 captured_at）
+visible: [home.png]             # 物化进 agent 工作区 frames/ 的帧（交付名由 deliveredPath 推，不带语义）
 ```
 
 **断言种类（v1.1 四种）**

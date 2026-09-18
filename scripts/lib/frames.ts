@@ -98,13 +98,7 @@ export interface DemoFrame {
   png: Buffer
 }
 
-/**
- * 帧在**数据集里**的名字：给人看的，要有语义。
- *
- * 别和"交付给 agent 时的名字"混起来 —— 那个在 `task.yaml` 的 `captured_at` 里，
- * 按 MaaFW 自己的截图规范（`MaaUtils/Time.hpp` 的 `format_now_for_filename`）命名。
- * 两个名字服务两个读者：数据集是我们查问题的，工作区是 agent 看的。
- */
+/** 数据集里的帧名：给我们查问题看的，环境自己按这些名字加载画面。 */
 export function renderFrames(): DemoFrame[] {
   return [
     { name: 'home.png', png: renderHome() },
