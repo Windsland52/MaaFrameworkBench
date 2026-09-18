@@ -117,7 +117,10 @@ export function createActor(screens: FramesScreen[], shotDir?: string): FramesAc
 
   const actor: maa.CustomControllerActor = {
     connect: () => true,
-    request_uuid: () => 'bench-frames-0001',
+    // 设备串号。**别写成带评测字样的东西**：框架会把它写进 maafw.log（实测 4 行），
+    // 任何"让 agent 看一眼设备信息或日志"的路径都会顺手告诉它"你在被评测"。
+    // Custom 控制器是 interface.json 里已经写着的事实，所以这个串号不额外泄漏什么。
+    request_uuid: () => 'custom-ctrl-0001',
     get_features: () => [],
     screencap: () => {
       const bytes = encoded.get(current.name) ?? null
