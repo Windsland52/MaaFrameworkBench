@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { load } from 'js-yaml'
+import { scorerIdentity } from '../src/runner/identity.ts'
 import { REPO_ROOT } from '../src/runner/root.ts'
 import { loadTask } from '../src/runner/task.ts'
 
@@ -90,23 +91,37 @@ interface RunInfo {
   status: string
   passed: boolean | null
   finished: string
+  /** 这份分数是哪版判据打的；null = 没判分，或判分时还没记版本 */
+  scorerSha: string | null
 }
+const currentScorer = scorerIdentity().sha256
 const runs: RunInfo[] = runIds.map((id) => {
   const meta = JSON.parse(readFileSync(join(runsDir, id, 'run.json'), 'utf8')) as {
     status?: string
     finished_at?: string
   }
   const scoreFile = join(runsDir, id, 'score.json')
-  const passed = existsSync(scoreFile)
-    ? (JSON.parse(readFileSync(scoreFile, 'utf8')) as { passed?: boolean }).passed === true
+  const score = existsSync(scoreFile)
+    ? (JSON.parse(readFileSync(scoreFile, 'utf8')) as { passed?: boolean; scorer?: { sha256?: string } })
     : null
-  return { id, status: meta.status ?? '?', passed, finished: meta.finished_at ?? '' }
+  return {
+    id,
+    status: meta.status ?? '?',
+    passed: score === null ? null : score.passed === true,
+    finished: meta.finished_at ?? '',
+    scorerSha: score?.scorer?.sha256 ?? null,
+  }
 })
 line('run', runs.length + ' 条')
 if (runs.length > 0) {
   const byStatus = new Map<string, number>()
   for (const r of runs) byStatus.set(r.status, (byStatus.get(r.status) ?? 0) + 1)
   sub('跑完情况：' + [...byStatus.entries()].map(([s, n]) => s + ' ' + n).join(' / '))
+  // 判据改过之后，老分数会静默过期 —— 这条就是那个提醒
+  const judgedAll = runs.filter((r) => r.passed !== null)
+  const stale = judgedAll.filter((r) => r.scorerSha !== currentScorer).length
+  if (stale > 0)
+    sub('⚠ 其中 ' + stale + ' 条不是当前判据打的：改过判分器就该重打分（pnpm score <run 目录>），新旧分数别混着报')
   const judged = runs.filter((r) => r.passed !== null)
   if (judged.length > 0)
     sub(

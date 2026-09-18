@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hashFile, hashTree } from './hash.ts'
+import { envIdentity, scorerIdentity, taskIdentity } from './identity.ts'
 import { parseLooseJson, preflightPipeline, scanForbiddenActions } from './preflight.ts'
 import { parseUsage, type Usage } from './usage.ts'
 import { OCR_MODEL_DIR, REPO_ROOT } from './root.ts'
@@ -282,6 +283,9 @@ export async function runTask(taskId: string, opts: RunOptions): Promise<RunResu
         schema_version: 1,
         run_id: runId,
         task_id: task.id,
+        // 三份身份：改题、改判据、换数据集，都靠它们才判断得出"这批和那批能不能比"
+        task: { id: task.id, sha256: taskIdentity(task.id) },
+        env: { dataset: task.env.dataset, sha256: envIdentity(task.env.dataset) },
         system: { harness: 'none@0', model: opts.system },
         seed: opts.seed,
         repeat_index: opts.repeat,
@@ -290,6 +294,7 @@ export async function runTask(taskId: string, opts: RunOptions): Promise<RunResu
         status,
         submission: { path: 'artifact/', sha256: submissionSha256 },
         framework: { maa_node: maaNodeVersion() },
+        scorer: scorerIdentity(),
         task_file: taskFile,
         error: failure,
         // 我们测的：这次跑了多久（exec 的明细在 ops.jsonl，不在这里重复存）

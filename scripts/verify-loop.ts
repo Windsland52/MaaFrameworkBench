@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { hashFiles, hashTree } from '../src/runner/hash.ts'
+import { envIdentity, scorerIdentity, taskIdentity } from '../src/runner/identity.ts'
 import { REPO_ROOT } from '../src/runner/root.ts'
 import { runTask } from '../src/runner/main.ts'
 import { score } from '../src/scorer/main.ts'
@@ -177,7 +179,48 @@ async function checkUsageBranch(): Promise<number> {
   return bad_
 }
 
+/**
+ * 身份字段的边界。
+ *
+ * 这两个断言守的都是**静默失效**：
+ *   - 夹具若混进任务哈希，以后每改一次夹具，所有老 run 都会被判成"换了题"
+ *   - seed 若掉了，两道种子不同的题会算出同一个身份，看起来像同一版
+ * 两种都不会报错，只会让"能不能比"这个判断悄悄失真。
+ */
+function checkIdentity(): number {
+  const taskDir = resolve(REPO_ROOT, 'tasks/t001-enter-inventory')
+  const withFixtures = hashTree(taskDir).sha256
+  const identity = taskIdentity('t001-enter-inventory')
+  const justTaskYaml = hashFiles(REPO_ROOT, ['tasks/t001-enter-inventory/task.yaml'])
+  const scorer = scorerIdentity()
+  const env = envIdentity('maafw-demo-frames')
+
+  let bad = 0
+  const report = (ok: boolean, name: string, detail: string): void => {
+    if (!ok) bad += 1
+    console.log((ok ? 'OK  ' : 'FAIL') + ' | ' + name + '\n       ' + detail)
+  }
+
+  report(
+    identity !== withFixtures,
+    '任务哈希排除 fixtures（换夹具不该让老 run 作废）',
+    '含夹具=' + withFixtures.slice(0, 12) + '  任务身份=' + identity.slice(0, 12),
+  )
+  report(
+    identity !== justTaskYaml,
+    '任务哈希不止 task.yaml（seed/ 也在里面）',
+    '只有 task.yaml=' + justTaskYaml.slice(0, 12),
+  )
+  report(
+    typeof scorer.version === 'number' && scorer.sha256.length === 64 && env.length === 64,
+    '判分器与环境身份齐备',
+    '判分器 v' + scorer.version + ' ' + scorer.sha256.slice(0, 12) + '  环境 ' + env.slice(0, 12),
+  )
+  return bad
+}
+
 let failures = 0
+failures += checkIdentity()
 failures += await checkUsageBranch()
 if (!(await checkReproducible())) failures += 1
 for (const c of cases) {

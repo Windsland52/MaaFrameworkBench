@@ -40,6 +40,18 @@ export function hashTree(
   return { sha256: sha256(manifest), files }
 }
 
+/**
+ * 一组文件的确定性哈希（清单里写**调用方给的相对路径**，不写绝对路径 ——
+ * 绝对路径进哈希会让两台机器克隆出不同的身份，那这个字段就没意义了）。
+ */
+export function hashFiles(root: string, relPaths: string[]): string {
+  const manifest = [...relPaths]
+    .sort()
+    .map((rel) => rel + '\t' + hashFile(join(root, rel)))
+    .join('\n')
+  return sha256(manifest)
+}
+
 export function hashFile(path: string): string {
   return sha256(statSync(path).isFile() ? readFileSync(path) : readFileSync(path))
 }

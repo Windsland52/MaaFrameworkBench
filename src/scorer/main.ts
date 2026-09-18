@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { scorerIdentity } from '../runner/identity.ts'
 import { REPO_ROOT } from '../runner/root.ts'
 import { loadTask, type AssertSpec, type TaskDef } from '../runner/task.ts'
 
@@ -19,6 +20,8 @@ export interface ScoreResult {
   run_id: string
   task_id: string
   submission_sha256: string
+  /** 这份分数是哪版判据打出来的（改判据后靠它判断该不该重打分） */
+  scorer: { version: number; sha256: string }
   passed: boolean
   stages: { load: boolean; graph: boolean; execute: boolean; achieve: boolean }
   asserts: AssertResult[]
@@ -215,6 +218,7 @@ export async function score(runDir: string): Promise<ScoreResult> {
     run_id: run.run_id ?? '',
     task_id: taskId,
     submission_sha256: run.submission?.sha256 ?? '',
+    scorer: scorerIdentity(),
     passed: achieveOk,
     stages: { load: loadOk, graph: graphOk, execute: executeOk, achieve: achieveOk },
     asserts,

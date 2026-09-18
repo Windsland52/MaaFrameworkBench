@@ -137,6 +137,8 @@ runs/<run_id>/
   "schema_version": 1,
   "run_id": "t001.sysA.seed1.r0",
   "task_id": "t001-enter-inventory",
+  "task": { "id": "t001-enter-inventory", "sha256": "…" },
+  "env": { "dataset": "maafw-demo-frames", "sha256": "…" },
   "system": {
     "harness": "claude-code@1.2.3",
     "model": "deepseek-v4.1-flash",
@@ -150,12 +152,32 @@ runs/<run_id>/
   "finished_at": "2026-09-15T12:00:42Z",
   "status": "succeeded",
   "submission": { "path": "artifact/", "sha256": "..." },
-  "framework": { "maa_node": "5.13.0", "maafw_tag": "v5.13.0" },
+  "framework": { "maa_node": "5.13.0" },
+  "scorer": { "version": 1, "sha256": "…" },
   "harness_defaults": { "Default": { "timeout": 3000 } }
 }
 ```
 
 `status` 取 `succeeded | failed | timeout | error` —— **这只是"跑完了没有"，不是"做对了没有"**。做对没有看 `score.json`。
+
+### 三份身份：什么让两个分数可比
+
+`task` / `env` / `scorer` 回答同一个问题：**这两个分数能不能放在一起比。**
+
+> 可比 ⟺ **任务包哈希 + 判分器版本 + 系统身份** 三者相同（环境与框架版本另行标注）
+
+`schema_version` **不参与**这个判断 —— 它是文件格式版本，只管"读不读得出来"。
+真正会静默毁掉结论的是反过来那个方向：**格式没变、判定变了** —— 同一份 run 前后能判出不同结果，
+而没有任何字段提醒你。所以：
+
+| 字段 | 覆盖什么 | 谁生成 |
+| `task.sha256` | `task.yaml` + `seed/`（**不含 fixtures/** —— 换夹具不该让老 run 作废） | 自动 |
+| `env.sha256` | 数据集在 `datasets.yaml` 里的声明（含每个文件的 sha256） | 自动 |
+| `scorer.version` | **人手声明**的语义版本，改判定规则时必须 bump | 人 |
+| `scorer.sha256` | 判定逻辑那份源码 | 自动 |
+
+`score.json` 也记一份 `scorer`：它是"这份分数是哪版判据打的"。
+判分器改过之后要么批量重打分，要么在报告里把新旧分开 —— `pnpm status` 会提示有多少条不是当前判据打的。
 
 **提交在注入之前就冻结。** `harness_defaults` 是执行器写进资源包的默认值（目前只有
 `Default.timeout`，来自 `budget.node_timeout_ms`）—— 框架在**加载时**把 Default 合并进每个节点，
