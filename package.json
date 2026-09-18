@@ -15,7 +15,8 @@
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
     "status": "node scripts/status.ts",
-    "check": "pnpm typecheck && pnpm format:check && node scripts/check-usage.ts && node scripts/check-rules.ts && node scripts/check-tasks.ts && node scripts/verify-loop.ts",
+    "check": "pnpm typecheck && pnpm format:check && node scripts/check-usage.ts && node scripts/check-rules.ts && node scripts/check-tasks.ts && node scripts/check-method.ts && node scripts/verify-loop.ts",
+    "method": "node scripts/check-method.ts",
     "verify": "node scripts/verify-loop.ts"
   },
   "dependencies": {

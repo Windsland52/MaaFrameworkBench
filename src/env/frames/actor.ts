@@ -58,17 +58,20 @@ export function createActor(screens: FramesScreen[]): FramesActor {
    * 输入命中 transitions 就切屏；没命中不算失败 —— 真实环境里点空白也不报错。
    * 记的是**动作出发时**的屏，不是切完之后的那屏：同一份 ops.jsonl 里要能看出
    * "在哪屏上做的这个动作 / 这个动作把画面带到了哪"，两个都不丢。
+   *
+   * `moved` 只认"画面真的换了"：声明一条指回自己的 transition 时画面并没有动，
+   * 记成 true 就等于在 ops 里撒谎，而"点对了没有"正是从这一栏读的。
    */
   const apply = (op: string, x: number, y: number, arg: unknown): boolean => {
     const from = current.name
     const hit = current.transitions?.find((t) => inArea(t.area, x, y))
-    if (!hit) {
-      record(op, from, true, false, arg)
-      return true
+    const target = (hit ? byName.get(hit.target) : undefined) ?? current
+    const moved = target.name !== from
+    if (moved) {
+      current = target
+      history.push({ screen: current.name, at: Date.now() })
     }
-    current = byName.get(hit.target) ?? current
-    history.push({ screen: current.name, at: Date.now() })
-    record(op, from, true, true, arg)
+    record(op, from, true, moved, arg)
     return true
   }
 

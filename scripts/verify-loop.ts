@@ -4,8 +4,10 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { hashFiles, hashTree } from '../src/runner/hash.ts'
 import { envIdentity, scorerIdentity, taskIdentity } from '../src/runner/identity.ts'
+import { runMethodProblems } from '../src/runner/method.ts'
 import { REPO_ROOT } from '../src/runner/root.ts'
 import { runTask } from '../src/runner/main.ts'
+import { loadTask } from '../src/runner/task.ts'
 import { score } from '../src/scorer/main.ts'
 
 /**
@@ -13,6 +15,10 @@ import { score } from '../src/scorer/main.ts'
  *
  * 没有这一组，"判分器把所有东西都判过"和"判分器工作正常"看起来一模一样。
  * 它只是开发期自检，不是评测流程的一部分。
+ *
+ * 每条 case 跑完还顺手核一遍**执行方法**（一次 post 一次 task / 画面只由输入驱动，
+ * 见 src/runner/method.ts）：方向相反的两个洞 —— 判据太松会放坏人过去，
+ * 过程证据的生成方式变了则会让判据判的不是一次真实的跑。
  *
  * 两处来自实测、不那么直觉的期望：
  *   - 识别不到的节点**不发 PipelineNode.Starting**，也不会有识别结果，
@@ -223,6 +229,8 @@ let failures = 0
 failures += checkIdentity()
 failures += await checkUsageBranch()
 if (!(await checkReproducible())) failures += 1
+/** 一次跑出来的过程证据，顺手核一遍执行方法（见 src/runner/method.ts） */
+const entry = loadTask(REPO_ROOT, 't001-enter-inventory').task.entry
 for (const c of cases) {
   // runner 不允许同一个 (task, system, seed, repeat) 有第二条记录，自检重跑先清自己的目录
   rmSync(resolve(REPO_ROOT, 'runs', 't001-enter-inventory.verify.s1.r' + c.repeat), { recursive: true, force: true })
@@ -241,7 +249,9 @@ for (const c of cases) {
   const want = (c.expectFailing ?? []).slice().sort()
   const runText = readFileSync(resolve(result.runDir, 'run.json'), 'utf8')
   const errorOk = c.expectErrorIncludes === undefined ? true : runText.includes(c.expectErrorIncludes)
-  const ok = scored.passed === c.expectPass && failing.join(',') === want.join(',') && errorOk
+  // 执行方法也要在这一跑上成立：判据再准，过程证据的生成方式变了也白搭
+  const method = runMethodProblems(result.runDir, entry)
+  const ok = scored.passed === c.expectPass && failing.join(',') === want.join(',') && errorOk && method.length === 0
   if (!ok) failures += 1
   console.log(
     (ok ? 'OK  ' : 'FAIL') +
@@ -264,6 +274,7 @@ for (const c of cases) {
         .match(/"detail": "(.*)"/g)
         ?.join(' / '),
   )
+  console.log('       执行方法 | ' + (method.length === 0 ? '一次 post + 画面由输入驱动' : method.join('；')))
 }
 console.log(failures === 0 ? '闭环自检通过' : '闭环自检失败 ' + failures + ' 例')
 process.exitCode = failures === 0 ? 0 : 1
