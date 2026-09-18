@@ -110,7 +110,9 @@ const scanCases: ScanCase[] = [
   },
   {
     name: '正常提交（就是仓库里的参照实现）',
-    files: { 'pipeline/main.json': readFileSync(join(REPO_ROOT, 'systems/ref/main.json'), 'utf8') },
+    files: {
+      'pipeline/main.json': readFileSync(join(REPO_ROOT, 'tasks/t001-enter-inventory/fixtures/correct.json'), 'utf8'),
+    },
     expectHit: false,
   },
   {

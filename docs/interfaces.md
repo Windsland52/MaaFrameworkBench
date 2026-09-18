@@ -37,6 +37,7 @@ tasks/<task_id>/
   seed/                # 种子项目：agent 要改的东西（CMP 形状）
     interface.json
     resource/base/pipeline/*.json
+  fixtures/            # 夹具：参照实现 + 已知缺陷变体，供自检与造题门禁用，绝不物化
 ```
 
 **画面是数据，声明不是副本。** `visible` 与 `env.screens` 只写帧的**名字**；

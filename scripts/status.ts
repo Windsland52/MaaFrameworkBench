@@ -75,8 +75,8 @@ gap()
 /* ---- 参照系统 ---- */
 const systemsDir = resolve(REPO_ROOT, 'systems')
 const systems = existsSync(systemsDir) ? readdirSync(systemsDir).sort() : []
-line('产出目录', systems.length + ' 个：' + systems.join(' / '))
-sub('这里放"被测系统交给我们的东西"；现在只有手写的参照实现，还没有真模型产出的')
+line('被测系统', systems.length === 0 ? '还没有' : systems.length + ' 个：' + systems.join(' / '))
+sub('systems/<name>/ 放真实被测系统交出来的东西；各任务的夹具在 tasks/<id>/fixtures/')
 
 /* ---- run ---- */
 const runsDir = resolve(REPO_ROOT, 'runs')
@@ -120,7 +120,9 @@ if (runs.length > 0) {
   const latest = runs[runs.length - 1]!
   sub('最新：' + latest.id + '  status=' + latest.status + '  passed=' + String(latest.passed))
 } else {
-  sub('还没跑过。试：pnpm bench t001-enter-inventory --system ref --seed 1 --repeat 0 --pipeline systems/ref/main.json')
+  sub(
+    '还没跑过。试：pnpm bench t001-enter-inventory --system ref --seed 1 --repeat 0 --pipeline tasks/t001-enter-inventory/fixtures/correct.json',
+  )
 }
 
 console.log(out.join('\n'))
