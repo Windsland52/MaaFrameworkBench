@@ -10,6 +10,8 @@ export interface ExecConfig {
   bundle: string
   ocrModelDir: string
   logDir: string
+  /** 交出去的每张图落在哪（run 目录下的 screens/） */
+  shotsDir: string
   eventsFile: string
   summaryFile: string
   entry: string
@@ -54,6 +56,7 @@ async function main(): Promise<void> {
     screens: cfg.screens,
     ocrModelDir: cfg.ocrModelDir,
     logDir: cfg.logDir,
+    shotsDir: cfg.shotsDir,
   })
   env.tasker.add_sink((_t, msg) => emit(msg))
 

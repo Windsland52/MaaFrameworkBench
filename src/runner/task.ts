@@ -1,6 +1,5 @@
-import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { extname, resolve } from 'node:path'
+import { resolve } from 'node:path'
 import { load } from 'js-yaml'
 
 /**
@@ -38,8 +37,6 @@ export interface TaskDef {
   kind: string
   covers: string[]
   env: EnvSpec
-  /** agent 工作区里可见的文件，相对 datasets.yaml 的 data_root（或仓库根，以 tasks/ 开头） */
-  visible: string[]
   entry: string
   prompt: string
   budget: {
@@ -137,32 +134,12 @@ export function parseTask(path: string, raw: unknown): TaskDef {
       dir: envRaw.dir,
       screens: screens as TaskScreen[],
     },
-    visible: (o.visible as string[] | undefined) ?? [],
     entry: need<string>('entry'),
     prompt: need<string>('prompt'),
     budget: parseBudget(path, o.budget),
     allow_actions: parseStringArray(path, 'allow_actions', o.allow_actions),
     assert: assertRaw as AssertSpec[],
   }
-}
-
-/**
- * `visible` 里的一项在**工作区**里叫什么。
- *
- * 数据集帧落进 `frames/` 时**推一个不带语义的名字**：文件名替 agent 做映射，
- * 等于替它做了识别。所以不手写、也不声明 —— 由数据集里的名字推出来，
- * 每个都推得出同一个值（帧本身是数据，名字不是别人要维护的第二份）。
- *
- * 与"按当时时间命名"无关：那是 controller 把图交出去时的运行时行为
- * （MaaFW 自己保存截图就用 `format_now_for_filename`），不落到这份素材上。
- *
- * 任务包自己的文件保持相对路径（去掉 `tasks/<id>/` 那一层）。
- * 物化与痕迹检查共用这一个规则 —— 规则写两遍，早晚有一遍是错的。
- */
-export function deliveredPath(visible: string): string {
-  if (visible.startsWith('tasks/')) return visible.replace(/^tasks\/[^/]+\//, '')
-  const digest = createHash('sha256').update(visible).digest('hex').slice(0, 12)
-  return 'frames/' + digest + extname(visible)
 }
 
 export function loadTask(repoRoot: string, taskId: string): { task: TaskDef; taskFile: string } {

@@ -9,7 +9,7 @@ import { envIdentity, scorerIdentity, taskIdentity } from './identity.ts'
 import { parseLooseJson, preflightPipeline, scanForbiddenActions } from './preflight.ts'
 import { parseUsage, type Usage } from './usage.ts'
 import { OCR_MODEL_DIR, REPO_ROOT } from './root.ts'
-import { deliveredPath, loadTask, type TaskDef } from './task.ts'
+import { loadTask, type TaskDef } from './task.ts'
 
 const CHILD = resolve(dirname(fileURLToPath(import.meta.url)), 'child.ts')
 
@@ -67,29 +67,17 @@ function sourcePath(repoRoot: string, task: TaskDef, declared: string): string {
 }
 
 /**
- * 物化工作区：只放白名单里的东西。
- * 断言、held-out 变体、环境自己的持出画面一律不进来 —— 能看到就能硬编码。
+ * 物化工作区：就是种子项目（agent 要改的那些文件）。
+ *
+ * **画面不进工作区。** 帧是环境的数据，落在沙箱外的 `data/`，由 controller 在跑的时候
+ * 一张一张交出去。往工作区里放一份截图，等于先把"这个应用长什么样"告诉它，
+ * 还顺手给它一块可以照着硬编码的东西 —— 这两件都不该发生。
+ *
+ * 刻意**不**留任何来源说明：SOURCE.json 这种东西只有评测才会有。要交代的写进题面。
  */
 function materialize(task: TaskDef, dest: string, repoRoot: string): void {
   const seed = resolve(repoRoot, 'tasks', task.id, 'seed')
   if (existsSync(seed)) cpSync(seed, dest, { recursive: true })
-  const copied: string[] = []
-  for (const visible of task.visible) {
-    const src = sourcePath(repoRoot, task, visible)
-    if (!existsSync(src)) throw new Error('visible 不在: ' + visible + ' -> ' + src)
-    const out = join(dest, deliveredPath(visible))
-    const isDir = statSync(src).isDirectory() && (visible.endsWith('/') || !visible.includes('.'))
-    if (isDir) {
-      mkdirSync(out, { recursive: true })
-      cpSync(src, out, { recursive: true })
-    } else {
-      mkdirSync(dirname(out), { recursive: true })
-      cpSync(src, out)
-    }
-    copied.push(visible)
-  }
-  // 刻意**不**在工作区里留任何来源说明：SOURCE.json 这种东西只有评测才会有
-  // （它还会顺手把数据集名和帧的文件名告诉 agent）。要交代的写进题面。
 }
 
 /**
@@ -217,6 +205,7 @@ export async function runTask(taskId: string, opts: RunOptions): Promise<RunResu
             summaryFile: join(runDir, 'exec-summary.json'),
             entry: task.entry,
             screens,
+            shotsDir: join(runDir, 'screens'),
           } satisfies Record<string, unknown>,
           null,
           2,

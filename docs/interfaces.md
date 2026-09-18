@@ -2,7 +2,8 @@
 
 > 日期：2026-09-15 · 状态：**冻结**（改动需显式记版本）
 > v1.1（2026-09-16）：断言加 `reco_text`；`frames` 的屏序列、`ops.jsonl` 字段按实测补全
-> v1.2（2026-09-18）：屏的第二个名字 captured_at 拿掉 —— 交付名不手写，由 `deliveredPath` 从数据集里的名字推出来
+> v1.2（2026-09-18）：屏的第二个名字 captured_at 拿掉 —— 交付名不再手写
+> v1.3（2026-09-18）：**画面不进工作区**（`visible` 与帧的交付一起删掉）；controller 交出的每张图落 `screens/`，名字是交出去的时间
 > 目的：让"重开会话"和"上团队"都成立 —— 后续所有工作只依赖本文 + `MaaFrameworkBench-设计定稿-2026-09-15.md`
 > 已实测的实施事实见文末。
 
@@ -41,15 +42,13 @@ tasks/<task_id>/
   fixtures/            # 夹具：参照实现 + 已知缺陷变体，供自检与造题门禁用，绝不物化
 ```
 
-**画面是数据，声明不是副本。** `visible` 与 `env.screens` 只写帧的**名字**；
-帧本身来自 `datasets.yaml` 的 images 包，落 `data/<id>/`。
-所以任务包里没有图片文件 —— 主仓不放二进制（§5）。
-`visible` 里的帧物化进工作区 `frames/`（相当于"你能看到的屏幕"），
-其余帧（held-out 变体）只在环境进程里可达，绝不进工作区。
+**画面是数据，声明不是副本。** `env.screens` 只写帧的**名字**；帧本身来自
+`datasets.yaml` 的 images 包，落 `data/<id>/`。所以任务包里没有图片文件 —— 主仓不放二进制（§5）。
 
-**交付名不带语义，而且不是手写的。** 数据集里的帧名是给环境和我们看的；工作区里那份由
-`deliveredPath` 从数据集里的名字推出来 —— 文件名替 agent 做映射，等于替它做了识别，
-所以它是个推出来的 token，不是谁要维护的第二份名字。屏的可读身份是 `env.screens[].name`（held-out）。
+**画面不进工作区。** 帧是环境的数据，跑的时候由 controller 一张一张交出去：每张落在
+`screens/` 下，**名字就是它被交出去的时间**（§2/§3）。工作区里只有种子项目，没有截图 ——
+放一份进去等于先把"这个应用长什么样"告诉 agent，还顺手给它一块可以照着硬编码的东西。
+agent 侧怎么拿到画面（自测设备/入口的形态）还没有冻结，见 §8。
 
 ### task.yaml
 
@@ -101,7 +100,6 @@ assert:                         # 判据（行为断言，held-out）
   - kind: op_count
     max_screencaps: 30          # 效率项（对应 4.2.1）
 
-visible: [home.png]             # 物化进 agent 工作区 frames/ 的帧（交付名由 deliveredPath 推，不带语义）
 ```
 
 **断言种类（v1.1 四种）**
@@ -130,6 +128,7 @@ runs/<run_id>/
   events.jsonl    # task / node 事件流
   ops.jsonl       # 控制器操作序列（环境侧记录）
   exec-summary.json # 执行子进程的回执：ops 原始记录、最终屏、终止原因
+  screens/        # controller 交出去的每一张图，文件名就是它被交出去的时间
   artifact/       # agent 提交工件的快照
   score.json      # 判分结果（§4）
   logs/           # MaaFW 自己的日志（maafw.log，含 all_results_ / filtered_results_）
@@ -284,10 +283,15 @@ interface FramesScreen {
 
 ```json
 {"op":"click","arg":{"x":262,"y":386},"screen":"home","ok":true,"moved":true,"at":1789520088381}
+{"op":"screencap","screen":"home","ok":true,"moved":false,"shot":"2026.09.18-21.07.41.318.png","at":1789520088390}
 ```
 
 `screen` 是**动作出发时**的屏，`moved` 是这次输入有没有真的把画面带过去。
 缺了 `moved`，一份 ops 只能看出「点过」，看不出「点对了没有」。
+
+`screencap` 多一栏 `shot`：这张图落在 `screens/` 里叫什么 —— 就是它被交出去的时间
+（MaaFW 自己保存截图用同一种名字）。名字里没有屏名：图什么时候给的、长什么样，
+是拿到图的人能用的信息；它是哪一屏，是环境内部的事。
 
 **运行期铁律**（适用于所有自研环境）
 
@@ -484,6 +488,7 @@ runs/                      运行产物（gitignore，不入库）
 - 断言 DSL 的具体语法（v1 三种 kind 够用）
 - 时延模型的具体参数（等真机采样）
 - held-out 变体的组织方式（等泛化项真正开测）
+- **agent 侧的画面来源** —— 自测设备 / 入口长什么样（工作区里已经不放帧，等它落地再冻结）
 - 多能力轴的任务包命名规范（等有第二条轴）
 - `subsets.yaml` 的具体语法（等第一个真子集落地）
 - 数据集包（kind=images/recording/env/log）的打包格式（等第一个落地）

@@ -11,6 +11,8 @@ export interface FramesEnvOptions {
   ocrModelDir: string
   /** MaaFW 自己的日志（含 all_results_ / filtered_results_）落在这里 */
   logDir: string
+  /** 交出去的每张图落在这里，文件名是它被交出去的时间；不给就不落盘 */
+  shotsDir?: string
 }
 
 export interface FramesEnv {
@@ -36,7 +38,7 @@ export async function bootFramesEnv(opts: FramesEnvOptions): Promise<FramesEnv> 
   maafw.Global.log_dir = opts.logDir
   maafw.Global.stdout_level = 'Off'
 
-  const frames = createActor(opts.screens)
+  const frames = createActor(opts.screens, opts.shotsDir)
   const res = new maafw.Resource()
   const ctrl = new maafw.CustomController(frames.actor)
   const tasker = new maafw.Tasker()

@@ -37,8 +37,7 @@ datasets:
     note: 合成标本画面（1280x720），由脚本确定性生成，不是真实设备采集
     generate: scripts/generate-frames.ts
     files:
-      # 数据集里的名字是给我们和环境看的；交付进工作区时的名字由 deliveredPath 推，
-      # 不在这里、也不在 task.yaml 里手写（手写的第二份名字早晚和这份对不上）
+      # 数据集里的名字只给环境和我们看：帧不进工作区，跑的时候由 controller 交出去
       - name: home.png
         sha256: 84434ad909bc95251e11d92bec07f9043e39e950b592e40cc43759cee8e01aac
       - name: inventory.png

@@ -8,8 +8,8 @@ env:
   dataset: maafw-demo-frames # 环境自带画面；agent 看不到全部
   dir: maafw-demo-frames # datasets.yaml 的 target，相对 data_root
   screens:
-    # path 只是数据集里的文件名（给环境和我们看）；交付进工作区 frames/ 时会推成
-    # 一个不带语义的名字，所以这里不用、也不该写第二个名字
+    # path 只是数据集里的文件名 —— 给环境和我们看。帧**不进工作区**：跑的时候由
+    # controller 一张一张交出去，名字是交出去的时间（不在这个文件里、也不在别处预先起名）
     - name: home
       path: home.png
       transitions:
@@ -23,12 +23,9 @@ env:
     - name: inventory-zero
       path: inventory-zero.png # held-out 变体：同屏、数量不同
 
-visible: [home.png] # 数据集里的帧；物化进工作区 frames/（交付名由 deliveredPath 推）
 entry: Main.Start
 
 prompt: |
-  frames/ 下是本任务的画面素材，和"被评测应用"运行时看到的屏幕一致。
-
   要求：从 HOME 屏进入 INVENTORY 屏，然后答出那一屏上序号显示的数量。
   产出一份能跑通的 pipeline（写进 resource/base/pipeline/），入口节点为 Main.Start。
   按钮要靠识别定位，不要写死坐标。

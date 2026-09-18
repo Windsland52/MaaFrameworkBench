@@ -9,8 +9,8 @@ runs/
 data/
 vendor/
 
-# 任务包里不放画面：帧来自 datasets.yaml 的 images 包（落 data/），
-# task.yaml 的 visible / env.screens 是声明，不是帧的副本。主仓不放二进制。
+# 任务包里不放画面：帧来自 datasets.yaml 的 images 包（落 data/，沙箱外），
+# task.yaml 的 env.screens 只写帧名，不是帧的副本。主仓不放二进制。
 tasks/**/*.png
 tasks/**/*.jpg
 tasks/**/*.jpeg
