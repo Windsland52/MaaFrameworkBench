@@ -1,5 +1,5 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
-import { basename, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { bootFramesEnv } from '../src/env/frames/boot.ts'
 import { materialize, sourcePath } from '../src/runner/main.ts'
 import { preflightPipeline } from '../src/runner/preflight.ts'
@@ -17,13 +17,16 @@ import { loadTask } from '../src/runner/task.ts'
  *   - **每次调用 = 一台新设备**：新进程、新 boot、初始屏。这就是"重置"，不需要额外接口。
  *   - **屏名不出去**：环境内部那个名字（`home` / `inventory-zero`）是 `env_state` 的
  *     判据词汇，给出去等于把答案和 held-out 变体一起交出去。对外只报 `s1` / `s2`。
+ *   - **图落在工作区外面**：帧是环境的东西。工作区里只该有这份提交本身 —— 自测的图
+ *     落进去，提交快照里就跟着有一堆截图。所以默认落在工作区的**兄弟目录**，
+ *     由这里把绝对路径打出来，agent 拿 `read_image` 去读。
  */
 
 interface Args {
   workspace: string
   taskId: string
   peek: boolean
-  /** 图与日志落在哪；缺省 <工作区>/.self-test */
+  /** 图与日志落在哪；缺省 <工作区>.self-test（工作区外面） */
   out: string
   rounds: number
   /** 我们调试用：连屏名一起打（给 agent 看时不要开） */
@@ -42,7 +45,7 @@ const USAGE = [
   '',
   '选项:',
   '  --task <id>     用哪个任务的设备（task.yaml 的 env.screens）；只有一个任务时可省略',
-  '  --out <dir>     图与 MaaFW 日志落在哪（默认 <工作区>/.self-test）',
+  '  --out <dir>     图与 MaaFW 日志落在哪（默认 <工作区>.self-test，在工作区外面）',
   '  --rounds <n>    重复跑 n 轮，每轮一台新设备（默认 1）',
   '  --names         连环境内部的屏名一起打（调试用）',
 ].join('\n')
@@ -103,7 +106,8 @@ if (args.init !== '') {
 const workspace = args.workspace
 if (!existsSync(workspace)) throw new Error('工作区不在: ' + workspace)
 const bundle = join(workspace, 'resource', 'base')
-const outDir = args.out !== '' ? resolve(args.out) : join(workspace, '.self-test')
+// 工作区的兄弟目录：工作区是"这份提交"，图不该混进去
+const outDir = args.out !== '' ? resolve(args.out) : resolve(dirname(workspace), basename(workspace) + '.self-test')
 const shotsDir = join(outDir, 'shots')
 
 const screens = task.env.screens.map((s) => ({ ...s, path: sourcePath(REPO_ROOT, task, s.path) }))
