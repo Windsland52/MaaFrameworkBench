@@ -6,6 +6,10 @@ import { methodProblems, type MethodEvidence } from '../src/runner/method.ts'
  * 理由和"判分器真的会判不过吗"那条一样：一个从来没红过的检查，
  * 和"这个检查根本不工作"看起来一模一样。负例里特意放了 Dbg 型错位 ——
  * 它在总识别次数上完全看不出来，只有对着序列才现形。
+ *
+ * 合成负例只证明"规则写得对"。真跑那一步另有变异审计：把 actor 的 screencap 换成
+ * Dbg 型环形轮播再跑一次正确提交，规则立刻报出三次"画面在跟着截图次数走"，
+ * 而**那次 run 的 status 依然是 succeeded** —— 这种错位不会自己报错，只会悄悄失真。
  */
 
 let failures = 0
