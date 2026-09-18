@@ -1,7 +1,7 @@
 {
-  "name": "maafw-bench-t001",
+  "name": "demo",
   "version": "1.0.0",
   "controller": [{ "name": "Custom", "type": "Custom" }],
   "resource": [{ "name": "base", "path": ["resource/base"] }],
-  "task": [{ "name": "EnterInventory", "entry": "Main.Start", "pipeline_override": {} }]
+  "task": [{ "name": "Main", "entry": "Main.Start", "pipeline_override": {} }]
 }

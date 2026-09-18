@@ -98,11 +98,23 @@ export interface DemoFrame {
   png: Buffer
 }
 
+/**
+ * 帧的文件名按 **MaaFW 自己的截图命名规范**来：`MaaUtils/Time.hpp` 的
+ * `format_now_for_filename()` —— `YYYY.MM.DD-HH.MM.SS.mmm`。
+ * 框架保存截图（`VisionBase` / `PipelineTask` / `Actuator`）用的就是这个格式。
+ *
+ * 为什么要这样：语义化的名字（home.png / inventory.png）会替 agent 做判断 ——
+ * 文件名直接告诉它"这是主页 / 这是库存页"。真实截图流没有语义，只有时间戳。
+ *
+ * 时间戳是**固定常量**，不是取当前时间：帧要能被确定性重建，sha256 钉在 datasets.yaml 里。
+ */
+const FRAME_TIMESTAMPS = ['2026.09.18-21.07.41.318', '2026.09.18-21.07.46.902', '2026.09.18-21.07.52.477']
+
 export function renderFrames(): DemoFrame[] {
   return [
-    { name: 'home.png', png: renderHome() },
-    { name: 'inventory.png', png: renderInventory('12') },
-    { name: 'inventory-zero.png', png: renderInventory('34') },
+    { name: FRAME_TIMESTAMPS[0] + '.png', png: renderHome() },
+    { name: FRAME_TIMESTAMPS[1] + '.png', png: renderInventory('12') },
+    { name: FRAME_TIMESTAMPS[2] + '.png', png: renderInventory('34') },
   ]
 }
 

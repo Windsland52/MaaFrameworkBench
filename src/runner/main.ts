@@ -91,13 +91,8 @@ function materialize(task: TaskDef, dest: string, repoRoot: string): void {
     }
     copied.push(visible)
   }
-  // 画面来自数据集、不属于种子项目，落一张来源说明免得被当成项目文件改
-  if (copied.length > 0 && !copied.some((p) => p.startsWith('tasks/'))) {
-    writeFileSync(
-      join(dest, 'frames', 'SOURCE.json'),
-      JSON.stringify({ dataset: task.env.type === 'frames' ? task.env.dataset : null, files: copied }, null, 2),
-    )
-  }
+  // 刻意**不**在工作区里留任何来源说明：SOURCE.json 这种东西只有评测才会有
+  // （它还会顺手把数据集名和帧的文件名告诉 agent）。要交代的写进题面。
 }
 
 /**
