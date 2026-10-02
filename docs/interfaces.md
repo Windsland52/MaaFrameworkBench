@@ -4,6 +4,7 @@
 > v1.1（2026-09-16）：断言加 `reco_text`；`frames` 的屏序列、`ops.jsonl` 字段按实测补全
 > v1.2（2026-09-18）：屏的第二个名字 captured_at 拿掉 —— 交付名不再手写
 > v1.3（2026-09-18）：**画面不进工作区**（`visible` 与帧的交付一起删掉）；controller 交出的每张图落 `screens/`，名字是交出去的时间
+> v1.4（2026-10-02）：增加 frames 设备 HTTP 协议与远程 controller 适配器；仅冻结已实现的协议，不冻结 WSL／容器生命周期。
 > 目的：让"重开会话"和"上团队"都成立 —— 后续所有工作只依赖本文 + `MaaFrameworkBench-设计定稿-2026-09-15.md`
 > 已实测的实施事实见文末。
 
@@ -303,6 +304,33 @@ interface FramesScreen {
 | 环境状态**只在进程内**，不落可写文件             | 否则 agent 的 custom 代码能改状态给自己判满分                             |
 | 跑框架的脚本末尾**必须** `process.exit()`        | MaaFW 的线程会让 node 进程不退出                                          |
 | 但用 `fetch` 的脚本**不能** `process.exit()`     | Node 24 的 undici 退出收尾会和它抢跑（libuv 断言）→ 用 `process.exitCode` |
+
+### frames 设备 HTTP 协议（v1.4）
+
+`src/env/frames/service.ts` 的 `serveFrames(screens, { host?, shotsDir? })` 创建一台独立设备，
+默认仅监听 `127.0.0.1` 的动态端口，返回 `url`、随机 `token`、宿主侧 `frames` 证据入口和 `close()`。
+每次调用从首屏开始；服务间状态与 token 独立。它复用本地 actor 的输入与记录逻辑，不加载 MaaFW 原生库。
+
+所有端点只接受 POST，必须带 `Authorization: Bearer <token>`，请求体为 JSON 参数数组（最多 4096 字节）。
+坐标与时长必须为安全整数，时长非负。响应禁止缓存。
+
+| 端点            | 参数                         | 成功响应                      |
+| --------------- | ---------------------------- | ----------------------------- |
+| `/v1/screencap` | `[]`                         | `image/png` 编码字节          |
+| `/v1/click`     | `[x, y]`                     | JSON boolean                  |
+| `/v1/swipe`     | `[x1, y1, x2, y2, duration]` | JSON boolean                  |
+| `/v1/shell`     | `[command, timeout]`         | JSON null（当前没有放行命令） |
+
+认证失败为 401，方法不支持为 405，未知端点为 404，非法参数为 400，过大请求为 413。
+响应不含内部屏名、转移规则、宿主路径或 ops；不存在远程状态查询、reset、文件读取端点。
+宿主通过返回的 `frames` 获取操作证据，截图由 `shotsDir` 控制留档。
+
+`src/env/frames/remote.ts` 的 `remoteFramesActor(url, token)` 可传给 `CustomController`，
+设备信息仅返回中性类型。未暴露的 controller 操作不在此协议支持范围内。
+
+`pnpm check:device` 用临时生成的 PNG 和本机 HTTP 验证协议，不需要 WSL、模型凭据、OCR 或 MaaFW 原生运行时。
+这不证明远程网络隔离或所有操作系统部署已通过；跨主机使用须由部署层限制监听地址、防火墙和传输保护。
+会话环境创建、凭据注入及 runner 接入仍未实现，不因本协议冻结而视为已完成。
 
 ### `web` / `replay` 的接口：**等实现时再定**
 

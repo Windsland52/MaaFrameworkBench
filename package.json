@@ -16,7 +16,8 @@
     "typecheck": "tsc --noEmit",
     "status": "node scripts/status.ts",
     "score": "node scripts/score.ts",
-    "check": "pnpm typecheck && pnpm format:check && node scripts/check-usage.ts && node scripts/check-rules.ts && node scripts/check-tasks.ts && node scripts/check-method.ts && node scripts/verify-loop.ts",
+    "check:device": "node scripts/check-device.ts",
+    "check": "pnpm typecheck && pnpm format:check && node scripts/check-usage.ts && node scripts/check-device.ts && node scripts/check-rules.ts && node scripts/check-tasks.ts && node scripts/check-method.ts && node scripts/verify-loop.ts",
     "method": "node scripts/check-method.ts",
     "verify": "node scripts/verify-loop.ts",
     "self-test": "node scripts/self-test.ts"
