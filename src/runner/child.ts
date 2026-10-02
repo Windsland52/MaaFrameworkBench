@@ -1,5 +1,5 @@
 import { createWriteStream, readFileSync, writeFileSync } from 'node:fs'
-import { bootFramesEnv } from '../env/frames/boot.ts'
+import { bootFramesEnv, bootRemoteFramesEnv } from '../env/frames/boot.ts'
 
 /**
  * 一个 run 的执行进程。runner 用子进程而不是直接跑，是因为 MaaFW 会 abort()、
@@ -10,17 +10,19 @@ export interface ExecConfig {
   bundle: string
   ocrModelDir: string
   logDir: string
-  /** 交出去的每张图落在哪（run 目录下的 screens/） */
-  shotsDir: string
   eventsFile: string
   summaryFile: string
   entry: string
-  /** 每屏的绝对路径与命中区 */
-  screens: Array<{
+  /** 本地分支：帧数据随配置进子进程（闭环替身 / 自测沿用这个形态） */
+  screens?: Array<{
     name: string
     path: string
     transitions?: Array<{ area: [number, number, number, number]; target: string }>
   }>
+  /** 交出去的每张图落在哪（run 目录下的 screens/）。远程分支由宿主侧的服务留档，这里没有 */
+  shotsDir?: string
+  /** 远程分支：只有设备地址与令牌 —— 帧数据、命中区不进这个进程 */
+  device?: { url: string; token: string }
 }
 
 /** 与 MaaFW 的 Status 常量同名，读日志的人不必再去查数字。 */
@@ -33,14 +35,19 @@ function statusName(status: number): 'succeeded' | 'failed' | 'error' {
 const cfg = JSON.parse(readFileSync(process.argv[2]!, 'utf8')) as ExecConfig
 const events = createWriteStream(cfg.eventsFile, { flags: 'w' })
 
-interface Summary {
+/** 框架侧回执：两种分支都交这份 */
+interface FrameworkReceipt {
   ok: boolean
   status: string
   raw_status: number
+  error?: string
+}
+
+/** 本地分支多交环境证据；远程分支的证据在宿主侧的服务里，不由这个进程经手 */
+interface LocalSummary extends FrameworkReceipt {
   final_screen: string
   ops: unknown[]
   screens: Array<{ screen: string; at: number }>
-  error?: string
 }
 
 async function emit(msg: unknown): Promise<void> {
@@ -51,13 +58,29 @@ async function emit(msg: unknown): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const env = await bootFramesEnv({
-    bundle: cfg.bundle,
-    screens: cfg.screens,
-    ocrModelDir: cfg.ocrModelDir,
-    logDir: cfg.logDir,
-    shotsDir: cfg.shotsDir,
-  })
+  if (cfg.device && (cfg.screens !== undefined || cfg.shotsDir !== undefined))
+    throw new Error('device 与 screens/shotsDir 互斥：远程分支不携带帧配置')
+  if (!cfg.device && cfg.screens === undefined) throw new Error('本地分支需要 screens（帧配置）')
+
+  // 本地句柄单独持有：FramesEnv 结构上是 RemoteFramesEnv 的超集，联合类型会被折叠，
+  // 收窄不能靠 'actor' in env
+  const local = cfg.device
+    ? undefined
+    : await bootFramesEnv({
+        bundle: cfg.bundle,
+        screens: cfg.screens!,
+        ocrModelDir: cfg.ocrModelDir,
+        logDir: cfg.logDir,
+        shotsDir: cfg.shotsDir,
+      })
+  const env =
+    local ??
+    (await bootRemoteFramesEnv({
+      bundle: cfg.bundle,
+      ocrModelDir: cfg.ocrModelDir,
+      logDir: cfg.logDir,
+      device: cfg.device!,
+    }))
   env.tasker.add_sink((_t, msg) => emit(msg))
 
   // 识别结果不落进事件的话，判分器只能证明"某个节点跑过了"，
@@ -93,15 +116,15 @@ async function main(): Promise<void> {
     failure = err instanceof Error ? err.message : String(err)
   }
 
-  const summary: Summary = {
+  const receipt: FrameworkReceipt = {
     ok: failure === undefined && raw === 3000,
     status: failure === undefined ? statusName(raw) : 'error',
     raw_status: raw,
-    final_screen: env.actor.screen(),
-    ops: env.actor.ops(),
-    screens: env.actor.state(),
     ...(failure === undefined ? {} : { error: failure }),
   }
+  const summary: FrameworkReceipt | LocalSummary = local
+    ? { ...receipt, final_screen: local.actor.screen(), ops: local.actor.ops(), screens: local.actor.state() }
+    : receipt
   writeFileSync(cfg.summaryFile, JSON.stringify(summary, null, 2))
   env.teardown()
   await new Promise<void>((done) => events.end(done))

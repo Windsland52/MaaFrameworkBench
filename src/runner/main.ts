@@ -8,6 +8,7 @@ import { hashFile, hashTree } from './hash.ts'
 import { envIdentity, scorerIdentity, taskIdentity } from './identity.ts'
 import { parseLooseJson, preflightPipeline, scanForbiddenActions } from './preflight.ts'
 import { parseUsage, type Usage } from './usage.ts'
+import { serveFrames } from '../env/frames/service.ts'
 import { OCR_MODEL_DIR, REPO_ROOT } from './root.ts'
 import { loadTask, type TaskDef } from './task.ts'
 
@@ -32,6 +33,11 @@ export interface RunOptions {
    * 一次真实测量比一次记账贵得多，所以坏输入只记 usage_error，不终止。
    */
   usageFrom?: string
+  /**
+   * 远程设备形态：runner 在宿主侧起 serveFrames（持有全部环境证据），执行子进程只拿
+   * url + token。不给就是本地形态 —— 帧随 exec-config 进子进程，证据从它的回执里来。
+   */
+  device?: { host?: string }
 }
 
 export interface RunResult {
@@ -49,9 +55,10 @@ interface ExecSummary {
   ok: boolean
   status: string
   raw_status: number
-  final_screen: string
-  ops: Array<Record<string, unknown>>
-  screens: Array<{ screen: string; at: number }>
+  /** 本地形态才有：远程形态的环境证据在宿主侧的服务里，子进程回执只有框架侧 */
+  final_screen?: string
+  ops?: Array<Record<string, unknown>>
+  screens?: Array<{ screen: string; at: number }>
   error?: string
 }
 
@@ -107,7 +114,7 @@ function applyHarnessDefaults(bundle: string, task: TaskDef): Record<string, unk
   return { Default: { timeout } }
 }
 
-async function execInChild(
+export async function execInChild(
   cfgFile: string,
   wallMs: number,
 ): Promise<{ code: number | null; timedOut: boolean; stderr: string }> {
@@ -186,44 +193,60 @@ export async function runTask(taskId: string, opts: RunOptions): Promise<RunResu
       failure = '提交不合规: ' + problems.join('；')
     } else {
       harnessDefaults = applyHarnessDefaults(bundle, task)
+      if (opts.device && task.env.type !== 'frames') throw new Error('device 目前只支持 frames 环境')
       const screens =
         task.env.type === 'frames'
           ? task.env.screens.map((s) => ({ ...s, path: sourcePath(repoRoot, task, s.path) }))
           : []
       for (const s of screens) if (!existsSync(s.path)) throw new Error('环境画面不在: ' + s.path)
 
-      const cfgFile = join(runDir, 'exec-config.json')
-      writeFileSync(
-        cfgFile,
-        JSON.stringify(
-          {
-            workspace,
-            bundle,
-            ocrModelDir: OCR_MODEL_DIR,
-            logDir,
-            eventsFile: join(runDir, 'events.jsonl'),
-            summaryFile: join(runDir, 'exec-summary.json'),
-            entry: task.entry,
-            screens,
-            shotsDir: join(runDir, 'screens'),
-          } satisfies Record<string, unknown>,
-          null,
-          2,
-        ),
-      )
+      // 远程形态：帧与命中区留在宿主侧的服务里，子进程只见地址与令牌；
+      // 服务必须在子进程结束前活着（回调全走它），证据在结束后读取。
+      let device: Awaited<ReturnType<typeof serveFrames>> | undefined
+      let exec: Awaited<ReturnType<typeof execInChild>>
+      try {
+        if (opts.device) {
+          device = await serveFrames(screens, { host: opts.device.host, shotsDir: join(runDir, 'screens') })
+        }
+        const cfg: Record<string, unknown> = {
+          workspace,
+          bundle,
+          ocrModelDir: OCR_MODEL_DIR,
+          logDir,
+          eventsFile: join(runDir, 'events.jsonl'),
+          summaryFile: join(runDir, 'exec-summary.json'),
+          entry: task.entry,
+          ...(device
+            ? { device: { url: device.url, token: device.token } }
+            : { screens, shotsDir: join(runDir, 'screens') }),
+        }
+        const cfgFile = join(runDir, 'exec-config.json')
+        writeFileSync(cfgFile, JSON.stringify(cfg, null, 2))
 
-      const exec = await execInChild(cfgFile, opts.budgetWallMs ?? task.budget.wall_ms ?? 120_000)
-      rmSync(cfgFile, { force: true })
+        exec = await execInChild(cfgFile, opts.budgetWallMs ?? task.budget.wall_ms ?? 120_000)
+        rmSync(cfgFile, { force: true })
+        // 非空才落：绑定层诊断（如 screencap 回调被拒时的 "expect ArrayBuffer, got …"）
+        // 只该出现在故障路径上 —— 正常 run 里有它是异常信号，不是噪音。
+        if (exec.stderr.trim() !== '') writeFileSync(join(runDir, 'exec-stderr.log'), exec.stderr)
+      } finally {
+        // 子进程已结束，环境证据到此完整。close 失败不遮原来的失败。
+        await device?.close().catch(() => {})
+      }
 
       const summary: ExecSummary | null = existsSync(join(runDir, 'exec-summary.json'))
         ? (JSON.parse(readFileSync(join(runDir, 'exec-summary.json'), 'utf8')) as ExecSummary)
         : null
 
-      if (summary) {
+      // 环境证据分了家：本地从子进程回执里来，远程从宿主侧的服务句柄里来。
+      // 远程形态即使子进程被硬杀（没有回执），服务里已发生的操作也是真实证据，照落。
+      const ops = device ? device.frames.ops() : (summary?.ops ?? [])
+      if (summary || device) {
         writeFileSync(
           join(runDir, 'ops.jsonl'),
-          summary.ops.map((op) => JSON.stringify(op)).join('\n') + (summary.ops.length ? '\n' : ''),
+          ops.map((op) => JSON.stringify(op)).join('\n') + (ops.length ? '\n' : ''),
         )
+      }
+      if (summary) {
         status = summary.status === 'succeeded' ? 'succeeded' : summary.status === 'failed' ? 'failed' : 'error'
         failure = summary.error
       } else if (exec.timedOut) {

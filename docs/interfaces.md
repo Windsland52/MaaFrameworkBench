@@ -5,6 +5,7 @@
 > v1.2（2026-09-18）：屏的第二个名字 captured_at 拿掉 —— 交付名不再手写
 > v1.3（2026-09-18）：**画面不进工作区**（`visible` 与帧的交付一起删掉）；controller 交出的每张图落 `screens/`，名字是交出去的时间
 > v1.4（2026-10-02）：增加 frames 设备 HTTP 协议与远程 controller 适配器；仅冻结已实现的协议，不冻结 WSL／容器生命周期。
+> v1.4.1（2026-10-03）：swipe 时长只校验不生效；远程设备形态的 exec 回执只含框架侧，环境证据由宿主侧合入 `ops.jsonl`；runner 已有最小接入（宿主起服务、子进程持 `remoteFramesActor`）；子进程 stderr 非空归档为 `exec-stderr.log`。
 > 目的：让"重开会话"和"上团队"都成立 —— 后续所有工作只依赖本文 + `MaaFrameworkBench-设计定稿-2026-09-15.md`
 > 已实测的实施事实见文末。
 
@@ -128,12 +129,17 @@ runs/<run_id>/
   run.json        # 身份与元数据
   events.jsonl    # task / node 事件流
   ops.jsonl       # 控制器操作序列（环境侧记录）
-  exec-summary.json # 执行子进程的回执：ops 原始记录、最终屏、终止原因
+  exec-summary.json # 执行子进程的回执：终止状态与原因；本地形态另有 ops 原始记录与最终屏
   screens/        # controller 交出去的每一张图，文件名就是它被交出去的时间
   artifact/       # agent 提交工件的快照
   score.json      # 判分结果（§4）
   logs/           # MaaFW 自己的日志（maafw.log，含 all_results_ / filtered_results_）
+  exec-stderr.log # 执行子进程 stderr（非空才落）：绑定层诊断只该出现在故障路径，正常 run 不该有它
 ```
+
+远程设备形态的 run 里，子进程回执只有框架侧（终止状态与原因），它的配置不携带帧数据
+（文件系统级的读隔离是另一件事，见 §3）；ops 与最终屏由宿主从设备服务合入 `ops.jsonl`，
+格式与本地形态一致 —— 判分层不关心证据来自哪边。
 
 ### run.json
 
@@ -296,14 +302,15 @@ interface FramesScreen {
 
 **运行期铁律**（适用于所有自研环境）
 
-| 规则                                             | 理由                                                                      |
-| ------------------------------------------------ | ------------------------------------------------------------------------- |
-| `screencap` 返回 **PNG 编码字节**（ArrayBuffer） | 绑定层走 `MaaImageBufferSetEncoded`，不是原始像素                         |
-| 每次回调**记录一条 ops.jsonl**                   | 效率项与轨迹证据的来源                                                    |
-| `shell` 只接受白名单命令，其余返回 null          | Shell 动作在自研环境里完全由我们控制                                      |
-| 环境状态**只在进程内**，不落可写文件             | 否则 agent 的 custom 代码能改状态给自己判满分                             |
-| 跑框架的脚本末尾**必须** `process.exit()`        | MaaFW 的线程会让 node 进程不退出                                          |
-| 但用 `fetch` 的脚本**不能** `process.exit()`     | Node 24 的 undici 退出收尾会和它抢跑（libuv 断言）→ 用 `process.exitCode` |
+| 规则                                                                  | 理由                                                                                                  |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `screencap` 返回 **PNG 编码字节**（ArrayBuffer）                      | 绑定层走 `MaaImageBufferSetEncoded`，不是原始像素                                                     |
+| 每次回调**记录一条 ops.jsonl**                                        | 效率项与轨迹证据的来源                                                                                |
+| `shell` 只接受白名单命令，其余返回 null                               | Shell 动作在自研环境里完全由我们控制                                                                  |
+| 环境状态**只在进程内**，不落可写文件                                  | 否则 agent 的 custom 代码能改状态给自己判满分                                                         |
+| 跑框架的脚本末尾**必须** `process.exit()`                             | MaaFW 的线程会让 node 进程不退出                                                                      |
+| 但用 `fetch` 的脚本**不能** `process.exit()`                          | Node 24 的 undici 退出收尾会和它抢跑（libuv 断言）→ 用 `process.exitCode`                             |
+| 执行子进程是上两条的交集（MaaFW 线程 + fetch），只能 `process.exit()` | 实测**未复现**断言（`check:integration` 守着覆盖到的场景）；未复现 ≠ 不存在，升级 Node 时这里先看一眼 |
 
 ### frames 设备 HTTP 协议（v1.4）
 
@@ -313,6 +320,7 @@ interface FramesScreen {
 
 所有端点只接受 POST，必须带 `Authorization: Bearer <token>`，请求体为 JSON 参数数组（最多 4096 字节）。
 坐标与时长必须为安全整数，时长非负。响应禁止缓存。
+时长只做校验：frames 环境没有时延，值不改变画面，也不进操作证据。
 
 | 端点            | 参数                         | 成功响应                      |
 | --------------- | ---------------------------- | ----------------------------- |
@@ -329,8 +337,11 @@ interface FramesScreen {
 设备信息仅返回中性类型。未暴露的 controller 操作不在此协议支持范围内。
 
 `pnpm check:device` 用临时生成的 PNG 和本机 HTTP 验证协议，不需要 WSL、模型凭据、OCR 或 MaaFW 原生运行时。
+`pnpm check:integration` 在其上走真实通路（runTask → 执行子进程 → 判分，`RunOptions.device`）并跑
+设备故障矩阵（死端口 / 错 token / 黑洞），需要 maa-node 原生库与 OCR，仍不需要 WSL 或模型凭据。
 这不证明远程网络隔离或所有操作系统部署已通过；跨主机使用须由部署层限制监听地址、防火墙和传输保护。
-会话环境创建、凭据注入及 runner 接入仍未实现，不因本协议冻结而视为已完成。
+runner 已有最小接入：宿主侧起服务持有环境证据，子进程只持 `remoteFramesActor`、配置不含帧数据；
+会话环境创建与凭据注入仍未实现，不因本协议冻结而视为已完成。
 
 ### `web` / `replay` 的接口：**等实现时再定**
 
