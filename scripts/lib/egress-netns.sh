@@ -6,12 +6,15 @@
 # 宿主端 IPv4 INPUT（DROP）、双侧 IPv6（ns 内禁用 IPv6；宿主端 veth 上 v6 全丢），
 # 链路本地地址也绕不过“只到代理”。
 #
-# 创建规则：同名资源已存在即**拒绝**（同名不证明归本次所有）；ERR 回滚只碰
-# 开工前确认不存在的名字 —— 途中挂在这些名字下的资源必属本次。
-# 销毁规则：先有界终止仍持有该命名空间的进程（删名字不会杀它们），再拆链路。
+# 所有权：create 以调用方给的 token 在 /run/bench-egress/<id>.token 落标记
+# （/run 与 netns 同寿命，停机同消）。destroy 只在标记存在且 token 相符时动手；
+# 标记不存在（含“同名资源属于他人”的冲突情形）一律跳过 —— **清理凭所有权记录，
+# 不凭 ID**。同名资源已存在即拒绝创建（exit 3）；ERR 回滚只碰已落标记的名字。
 set -euo pipefail
 
-usage() { echo "用法: $0 <run-id> <create|destroy> [host-ip ns-ip port]" >&2; exit 2; }
+MARKDIR=/run/bench-egress
+
+usage() { echo "用法: $0 <run-id> <create|destroy> <host-ip> <ns-ip> <port> <token>" >&2; exit 2; }
 [ $# -ge 2 ] || usage
 ID=$1
 CMD=$2
@@ -19,14 +22,29 @@ NS="bench-$ID"
 VH="vh-$ID" # Linux 网卡名上限 15 字符，run-id 保持短
 VN="vn-$ID"
 CHAIN="BENCH-$ID"
+MARKER="$MARKDIR/$ID.token"
 
 has_ns() { ip netns list | awk '{print $1}' | grep -Fxq "$NS"; }
 has_veth() { ip link show "$VH" >/dev/null 2>&1; }
 has_chain() { iptables -S "$CHAIN" >/dev/null 2>&1 || ip6tables -S "$CHAIN" >/dev/null 2>&1; }
+has_marker() { [ -f "$MARKER" ]; }
 
-conflict() { has_ns || has_veth || has_chain; }
+conflict() { has_ns || has_veth || has_chain || has_marker; }
+
+owned() {
+  # 标记在且 token 相符才动；缺标记（他人资源/未创建）跳过，token 不符拒绝
+  if ! has_marker; then
+    echo "未持有 $ID（无所有权标记）：跳过清理" >&2
+    return 1
+  fi
+  if [ "$(cat "$MARKER")" != "$TOKEN" ]; then
+    echo "所有权凭据不符：拒绝清理 $ID" >&2
+    exit 4
+  fi
+}
 
 destroy() {
+  owned || return 0
   # 持有该命名空间的进程：TERM → 有界等待 → KILL；“列表无残留”必须意味着进程也没了
   if has_ns; then
     local pids
@@ -51,22 +69,29 @@ destroy() {
     $ipt -F "$CHAIN" 2>/dev/null || true
     $ipt -X "$CHAIN" 2>/dev/null || true
   done
+  rm -f "$MARKER"
 }
 
 case $CMD in
 destroy)
+  [ $# -eq 3 ] || usage
+  TOKEN=$3
   destroy
   exit 0
   ;;
 create)
-  [ $# -eq 5 ] || usage
+  [ $# -eq 6 ] || usage
   HOST_IP=$3
   NS_IP=$4
   PORT=$5
+  TOKEN=$6
   if conflict; then
-    echo "冲突：$NS / $VH / $CHAIN 已存在 —— 同名不证明归本次所有，拒绝复用或覆盖" >&2
+    echo "冲突：$NS / $VH / $CHAIN / 所有权标记 已存在 —— 同名不证明归本次所有，拒绝复用或覆盖" >&2
     exit 3
   fi
+  mkdir -p "$MARKDIR"
+  (umask 077 && printf '%s\n' "$TOKEN" >"$MARKER")
+  # 回滚只清理已落标记的名字 —— 开工前已确认无冲突，途中这些名字下的资源必属本次
   trap destroy ERR
   ip netns add "$NS"
   # ns 内禁用 IPv6（all 管已有接口，default 管之后移入的 veth）：链路本地无从谈起；
@@ -77,6 +102,9 @@ create)
   ip link set "$VN" netns "$NS"
   ip addr add "$HOST_IP/24" dev "$VH"
   ip link set "$VH" up
+  # 宿主端 veth 也禁用 IPv6（仅本接口，共享策略不碰）：链路本地地址在两端都不存在，
+  # 绕过面从源头消除 —— 不依赖客户端对 zone/scope 的支持去“探测被过滤”
+  sysctl -q -w "net.ipv6.conf.$VH.disable_ipv6=1"
   ip -n "$NS" addr add "$NS_IP/24" dev "$VN"
   ip -n "$NS" link set "$VN" up
   ip -n "$NS" link set lo up

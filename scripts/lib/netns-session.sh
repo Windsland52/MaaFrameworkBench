@@ -2,8 +2,9 @@
 # netns 内 DSH 整体验收的机制侧：起环境、注入 key、跑会话、收证据、拆环境。
 # 只产出事实（stdout 标记行），断言由调用方（check-egress-netns.ts）做 —— 包括本脚本的退出码。
 #
-# 第三参数 fault=hang：不跑 DSH，改在 ns 里放一个脱离会话的挂起进程后立即收尾，
-# 验证销毁路径能终止持有命名空间的进程（删名字不会杀它们）。
+# 第三参数：main（默认，成功路径）/ fault=hang（故障路径：ns 内放脱离会话的挂起进程，
+# 就绪握手后立即收尾，验证销毁能终止持有命名空间的进程）。
+# 第四参数：所有权 token —— create 落标记、destroy 验证；清理凭所有权，不凭 ID。
 #
 # 输出标记：
 #   KV|<key>=<value>          事实键值
@@ -13,11 +14,13 @@ set -euo pipefail
 RUN=$1 # /tmp 下的运行目录（root 建）
 ID=$2
 MODE=${3:-main}
+TOKEN=${4:?用法: netns-session.sh <run-dir> <run-id> [main|fault] <token>}
 HOST_IP=10.212.61.1
 NS_IP=10.212.61.2
 PROXY_PORT=8787
 UP_PORT=8788
 NS="bench-$ID"
+VN="vn-$ID"
 SESSION_TIMEOUT=${BENCH_SESSION_TIMEOUT:-180}
 
 kv() { echo "KV|$1=$2"; }
@@ -35,7 +38,8 @@ stop_pid() {
 teardown() {
   stop_pid "${PROXY_PID:-}"
   stop_pid "${UP_PID:-}"
-  bash "$RUN/stage/egress-netns.sh" "$ID" destroy >/dev/null 2>&1 || true
+  # destroy 自带所有权检查：本次没创建成功（无标记）时跳过，不会碰他人的同名资源
+  bash "$RUN/stage/egress-netns.sh" "$ID" destroy "$TOKEN" >/dev/null 2>&1 || true
   rm -rf "$RUN" # 含 creds.env：销毁即清临时凭据
 }
 trap teardown EXIT
@@ -48,8 +52,8 @@ run_ns() {
     env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$RUN/home" DSH_HOME="$RUN/dsh-home" "$@"
 }
 
-# ---------- 1. 环境（同名冲突即拒） ----------
-bash "$RUN/stage/egress-netns.sh" "$ID" create "$HOST_IP" "$NS_IP" "$PROXY_PORT"
+# ---------- 1. 环境（同名冲突即拒；所有权 token 随 create 落标记） ----------
+bash "$RUN/stage/egress-netns.sh" "$ID" create "$HOST_IP" "$NS_IP" "$PROXY_PORT" "$TOKEN"
 
 # ---------- 2. key 注入前：基础包不含 key ----------
 KEY="synthetic-netns-$(date +%s)-$RANDOM"
@@ -61,22 +65,41 @@ NNP=$(run_ns sh -c 'grep "^NoNewPrivs:" /proc/self/status' | awk '{print $2}')
 BND=$(run_ns sh -c 'grep "^CapBnd:" /proc/self/status' | awk '{print $2}')
 [ "$NNP" = "1" ] && kv no_new_privs yes || kv no_new_privs no
 [ "$BND" = "0000000000000000" ] && kv capbnd_dropped yes || kv capbnd_dropped no
-V6COUNT=$(ip -n "$NS" addr show "$VN" | grep -c inet6)
-kv ns_ipv6_addrs "$V6COUNT"
-HOST_LL=$(ip -6 addr show dev "vh-$ID" scope link 2>/dev/null | awk '/inet6/ {print $2}' | cut -d/ -f1 | head -1)
-kv host_linklocal "${HOST_LL:-none}"
-if [ "${HOST_LL:-}" != "" ]; then
-  run_ns timeout 3 bash -c "exec 3<>/dev/tcp/$HOST_LL/$PROXY_PORT" >/dev/null 2>&1
-  [ $? -eq 0 ] && kv v6_linklocal_direct yes || kv v6_linklocal_direct no
+
+# 地址查询本身必须成功，计数才是证据；两端都应零 IPv6 地址（ns 禁用 + 宿主端 veth 禁用）
+# —— 链路本地面不存在，绕过面从源头消除，无需依赖客户端 zone 支持去探测过滤
+if NSADDR=$(ip -n "$NS" addr show "$VN" 2>&1); then
+  kv ns_ipv6_query ok
+  kv ns_ipv6_addrs "$(printf '%s\n' "$NSADDR" | grep -c inet6 || true)"
 else
-  kv v6_linklocal_direct untested
+  kv ns_ipv6_query failed
+  kv ns_ipv6_addrs unknown
+fi
+if HOSTADDR=$(ip addr show "vh-$ID" 2>&1); then
+  kv host_v6_query ok
+  kv host_v6_addrs "$(printf '%s\n' "$HOSTADDR" | grep -c inet6 || true)"
+else
+  kv host_v6_query failed
+  kv host_v6_addrs unknown
 fi
 set -e
 
 if [ "$MODE" = "fault" ]; then
-  # 故障路径：ns 里的挂起进程不是本会话的子进程 —— 销毁必须经 ip netns pids 终止它
+  # 故障路径：ns 里的挂起进程不是本会话的子进程 —— 就绪握手确认它已进入命名空间并
+  # 存活，销毁必须经 ip netns pids 终止它（删名字不会杀持有者）
   run_ns bash -c "exec -a benchfault-$ID sleep 300" &
-  kv fault_spawned yes
+  ready=no
+  for i in $(seq 1 25); do
+    for p in $(ip netns pids "$NS" 2>/dev/null || true); do
+      if tr '\0' ' ' <"/proc/$p/cmdline" 2>/dev/null | grep -q "benchfault-$ID"; then
+        ready=yes
+        break 2
+      fi
+    done
+    sleep 0.2
+  done
+  kv fault_ready "$ready"
+  [ "$ready" = "yes" ] || exit 5 # 未就绪不算有效故障注入
   exit 0 # 走 EXIT trap 的 teardown
 fi
 
@@ -85,7 +108,7 @@ node "$RUN/stage/mock-upstream.mjs" >"$RUN/upstream.ndjson" 2>&1 & UP_PID=$!
 node "$RUN/stage/proxy-run.mjs" "$RUN/proxy.json" >/dev/null 2>&1 & PROXY_PID=$!
 for _ in $(seq 1 50); do [ -s "$RUN/proxy.json" ] && break; sleep 0.2; done
 [ -s "$RUN/proxy.json" ] || { echo "代理没起来" >&2; exit 1; }
-TOKEN=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).token)' "$RUN/proxy.json")
+TOKEN_UP=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).token)' "$RUN/proxy.json")
 
 # ---------- 5. 环境创建后注入 key（不进基础包，不进归档） ----------
 mkdir -p "$RUN/home/ws" "$RUN/artifacts" "$RUN/dsh-home"
@@ -105,7 +128,7 @@ cat >"$RUN/artifacts/dsh-patch.yml" <<EOF
         baseURL: "http://$HOST_IP:$PROXY_PORT/v1"
         apiKeyEnv: BENCH_MOCK_KEY
         headers:
-          x-egress-token: "$TOKEN"
+          x-egress-token: "$TOKEN_UP"
         models:
           - id: mock-model
             contextWindow: 8192
@@ -143,16 +166,16 @@ http_code() {
     _ "http://$HOST_IP:$PROXY_PORT$1" "$2" 2>/dev/null || echo err
 }
 kv route_wrong_token "$(http_code /v1/chat/completions wrong-token)"
-kv route_unknown_path "$(http_code /x "$TOKEN")"
+kv route_unknown_path "$(http_code /x "$TOKEN_UP")"
 set -e
 
 # ---------- 8. 归档与证据 ----------
 if grep -R -F "$KEY" "$RUN/artifacts" >/dev/null 2>&1; then kv key_in_artifacts yes; else kv key_in_artifacts no; fi
 # 兜底：未结构化的日志行也可能藏 token —— 原文 grep 一遍
-if grep -F "$TOKEN" "$RUN/upstream.ndjson" >/dev/null 2>&1; then kv upstream_token_leak yes; else kv upstream_token_leak no; fi
+if grep -F "$TOKEN_UP" "$RUN/upstream.ndjson" >/dev/null 2>&1; then kv upstream_token_leak yes; else kv upstream_token_leak no; fi
 grep -q '"type":"final"' "$RUN/artifacts/dsh-events.jsonl" && kv final_present yes || kv final_present no
 grep -q '"kind":"completed"' "$RUN/artifacts/dsh-events.jsonl" && kv turn_completed yes || kv turn_completed no
 while IFS= read -r line; do echo "UP|$line"; done <"$RUN/upstream.ndjson"
 kv key "$KEY"
 
-# teardown（EXIT trap）：有界停代理与上游 → destroy（含 ns 内进程的有界终止）→ 删运行目录
+# teardown（EXIT trap）：有界停代理与上游 → destroy（所有权验证 + ns 进程有界终止）→ 删运行目录
