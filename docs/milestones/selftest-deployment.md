@@ -70,6 +70,32 @@ with p.open("xb") as f:
 
 目标用独占创建模式，已存在则拒绝覆盖。模型 key 不通过这条文件传输示例写入。
 
-**探针不是完整隔离证明。** 尚未验证所有提权、共享挂载与网络访问路径；出站网络未限制，公开仓库中的答案仍可能通过网络取得。
-本轮没有注入模型 key 或启动模型会话，也没有导出可复用会话镜像。
-模型 key 的创建时注入、网络策略与正式会话生命周期仍须独立实现和验收。
+**文件探针不是完整隔离证明。** 尚未验证所有提权、共享挂载与网络访问路径。
+
+## 网络隔离联调（2026-10-03，探针未固化）
+
+关键发现：**两个 WSL 发行版共享同一网络命名空间**，在专用发行版里改全局 OUTPUT 策略
+会波及别的发行版 —— 因此改用独立 netns + veth（未启用共享 IP 转发），策略落在
+拓扑上而不是可被 root 改写的规则上。
+
+分两层验证，均用临时探针（尚未固化为仓库部署入口；测试后 netns/veth 已删、
+共享防火墙与转发设置与测试前一致）：
+
+- **netns 层**：非特权进程在 netns 内经代理可达唯一放行的测试端口；直连其他端口、
+  Windows 网关、外部 IPv4/IPv6 全部失败；无权修改防火墙规则。
+- **代理层**（`src/egress/main.ts`，`pnpm check:egress`）：固定路由、认证、
+  4 MiB 体积上限、拒绝 CONNECT 与重定向。HTTPS 上游两模式验收
+  （`scripts/check-egress-tls.ts`）：未信任自签证书 → 502 且上游零 HTTP 请求；
+  显式信任（`NODE_EXTRA_CA_CERTS` 进程级注入，代理代码零改动）→ 200 且 SSE 完整。
+  复现注意事项：证书 SAN 必须含 IP 条目（Node 对 IP 主机不走 CN 回退）；
+  Git Bash 下 `openssl -subj` 需 `MSYS_NO_PATHCONV=1`。
+
+**DSH 兼容性（本机，模拟上游 + 合成 key）**：DSH 的 provider 配置原生支持
+`baseURL` + `headers` + `apiKeyEnv`（`llm-pi-ai` 条目的 `providers` patch），
+代理形态零改动。实测一轮 headless：路径精确命中 `/v1/chat/completions`，
+上游收到 `authorization: Bearer <合成 key>` 而 `x-egress-token` 为 null
+（代理 token 只到代理），SSE 流式完整往返，`turn_end: completed`。
+
+尚未完成：netns 联调脚本固化、DSH 在 netns 内经代理的整体验收、创建时模型 key
+注入。当前环境没有常驻出站限制，公开仓库中的答案仍可能经网络取得。
+本轮全程合成 key，未请求任何真实模型服务。上述全部通过之前不运行正式评测。
