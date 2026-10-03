@@ -95,7 +95,31 @@ with p.open("xb") as f:
 代理形态零改动。实测一轮 headless：路径精确命中 `/v1/chat/completions`，
 上游收到 `authorization: Bearer <合成 key>` 而 `x-egress-token` 为 null
 （代理 token 只到代理），SSE 流式完整往返，`turn_end: completed`。
+会话共发 2 个请求，其一为**辅助请求，来源未确认**。
 
-尚未完成：netns 联调脚本固化、DSH 在 netns 内经代理的整体验收、创建时模型 key
-注入。当前环境没有常驻出站限制，公开仓库中的答案仍可能经网络取得。
-本轮全程合成 key，未请求任何真实模型服务。上述全部通过之前不运行正式评测。
+## netns 内整体验收（2026-10-03，已固化）
+
+`pnpm` 外独立命令：`node scripts/check-egress-netns.ts <发行版名>`（驱动断言侧）+
+`scripts/lib/`（`egress-netns.sh` 生命周期、`netns-session.sh` 机制编排、模拟上游
+与代理启动件）。生命周期：创建（ns + veth + 双侧规则，失败即回滚同套资源）、
+非特权执行（setpriv 降权 + `env -i` 白名单）、销毁（按 run-id 精确拆除，netns /
+iptables 链 / 运行目录含临时凭据一并清理）。代理新增 `port` 绑定选项 —— netns
+防火墙按已知端口放行，动态端口不可用。
+
+实测 13 项断言全过：ns 内非特权 DSH（全新 `DSH_HOME`、环境变量白名单）完成会话
+（exit 0、final、`turn_end: completed`）；模拟上游只收到 2 个预期请求（固定路径、
+`Bearer <合成 key>`、无代理 token，原文兜底 grep 亦无）；ns 内可到代理端口、
+直连上游端口与外网均被拒；错 token 401、未知路由 403；key 注入前基础包不含、
+归档产物（patch/事件/stderr）不含、销毁后凭据文件清理；netns / 链 / 目录无残留。
+
+复现注意事项（实测踩过）：发行版 `/tmp` 随 WSL 停机清空，验收件传输与执行须在
+同一命令窗口内连续完成；`wsl.exe` 对 `bash -c` 参数会做**二次 shell 解析**（`$变量`
+被外层提前展开），跨边界脚本一律走 `--exec` 直通 + 事先落盘的脚本文件。
+
+发行版内 dsh 为 0.2.0-rc.2（宿主 rc.1）—— 会话由镜像内的 dsh 跑，身份以它为准。
+尚未完成：真实 provider 的短请求（另行授权后做）、正式会话生命周期。
+当前环境仍不运行正式评测。
+
+边界（截至本节）：netns 隔离与 key 注入机制均以合成 key 验收通过，但**正式会话
+环境的完整装配（题面 + 种子 + 真实 key + 会话生命周期）尚未建**，发行版常驻环境
+仍无出站限制；真实 provider 的短请求须另行授权后再做。此前不运行正式评测。

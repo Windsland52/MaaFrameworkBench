@@ -5,6 +5,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 /** 固定路由代理，不接受调用方提供上游 URL，也不支持 CONNECT 或重定向。 */
 export async function serveEgress(options: {
   host: string
+  port?: number
   routes: Record<string, { target: string; deadlineMs?: number }>
 }) {
   const routes = new Map(
@@ -104,7 +105,8 @@ export async function serveEgress(options: {
   server.on('connect', (_req, socket) => socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'))
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
-    server.listen(0, options.host, () => {
+    // port 缺省 0（动态）；netns 拓扑要按已知端口放行防火墙，部署方固定它
+    server.listen(options.port ?? 0, options.host, () => {
       server.off('error', reject)
       resolve()
     })
