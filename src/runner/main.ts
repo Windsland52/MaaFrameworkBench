@@ -114,39 +114,107 @@ function applyHarnessDefaults(bundle: string, task: TaskDef): Record<string, unk
   return { Default: { timeout } }
 }
 
-export async function execInChild(
-  cfgFile: string,
-  wallMs: number,
-): Promise<{ code: number | null; timedOut: boolean; stderr: string }> {
+export interface ExecResult {
+  code: number | null
+  timedOut: boolean
+  stderr: string
+  /** 宽限到期、本端管道被强关：stderr 可能不完整 —— 不得当作干净退出 */
+  stdioIncomplete?: true
+}
+
+export async function execInChild(cfgFile: string, wallMs: number, script: string = CHILD): Promise<ExecResult> {
   return await new Promise((done) => {
-    const child = spawn(process.execPath, [CHILD, cfgFile], { stdio: ['ignore', 'ignore', 'pipe'] })
+    const child = spawn(process.execPath, [script, cfgFile], { stdio: ['ignore', 'ignore', 'pipe'] })
     let stderr = ''
     let timedOut = false
     let settled = false
+    let exited: { code: number | null } | undefined
+    let grace: NodeJS.Timeout | undefined
+    let stdioIncomplete = false
+    const settle = (): void => {
+      if (settled) return
+      settled = true
+      if (grace !== undefined) clearTimeout(grace)
+      done({ code: exited?.code ?? null, timedOut, stderr, ...(stdioIncomplete ? { stdioIncomplete: true } : {}) })
+    }
     child.stderr.on('data', (chunk: Buffer) => {
-      if (settled) return // 结算后再来的输出没有归属，丢掉比串到下一条记录里好
       stderr += chunk.toString()
     })
-    const timer = setTimeout(() => {
+    // 阶段一（执行）：进程存活受墙钟预算约束。exit 一到就停表 —— 之后等的是 stdio，
+    // 不是执行；不停表会把一次正常退出误报成"墙钟超时"，还会对已死的 PID 补刀。
+    const wall = setTimeout(() => {
       timedOut = true
       // 整个进程组：MaaFW 会起子线程，detach 的进程也不能留下
       const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
       killer.on('error', () => {})
       child.kill('SIGKILL')
     }, wallMs)
+    // 阶段二（收尾）：exit 不保证 stdio 已收完（close 才是）。宽限只管这一段，
+    // 到期就强关**本端管道**并打上 stdioIncomplete —— 只让 Promise 返回而不放手，
+    // 管道会拽住 runner 进程自己退不出去。
+    child.on('exit', (code) => {
+      exited = { code }
+      clearTimeout(wall)
+      grace = setTimeout(() => {
+        stdioIncomplete = true
+        child.stderr.destroy()
+        settle()
+      }, 5000)
+    })
+    child.on('close', settle)
     child.on('error', (err) => {
       if (settled) return
       settled = true
-      clearTimeout(timer)
+      clearTimeout(wall)
+      if (grace !== undefined) clearTimeout(grace)
       done({ code: null, timedOut, stderr: stderr + String(err) })
     })
-    child.on('exit', (code) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      done({ code, timedOut, stderr })
-    })
   })
+}
+
+/**
+ * 结算 run 的 status：**进程怎么结束优先于框架回执**。回执只说明框架任务的结果 ——
+ * 它写在 teardown 之前，之后的卡死/崩溃照样发生，一份成功的回执盖不掉它们。
+ */
+export function settleOutcome(
+  summary: { status: string; error?: string } | null,
+  exec: { code: number | null; timedOut: boolean; stderr: string; stdioIncomplete?: true },
+): { status: RunResult['status']; failure?: string } {
+  if (exec.timedOut) {
+    const notes: string[] = []
+    if (summary !== null) notes.push('框架回执 ' + summary.status + '，但进程未在墙钟内退出')
+    if (exec.stdioIncomplete) notes.push('输出收尾不完整')
+    return {
+      status: 'timeout',
+      failure: '墙钟超时，已硬杀进程组' + (notes.length === 0 ? '' : '（' + notes.join('；') + '）'),
+    }
+  }
+  if (exec.stdioIncomplete) {
+    return {
+      status: 'error',
+      failure:
+        '输出收尾不完整：宽限到期强关管道，stderr 可能缺失（退出码 ' +
+        String(exec.code) +
+        '，框架回执 ' +
+        (summary?.status ?? '无') +
+        '）—— 不得当作干净退出',
+    }
+  }
+  if (exec.code !== 0) {
+    return {
+      status: 'error',
+      failure:
+        (exec.stderr.trim() || '子进程退出码 ' + String(exec.code)) +
+        (summary === null ? '' : '（框架回执 ' + summary.status + '，进程仍异常结束）'),
+    }
+  }
+  if (summary !== null) {
+    return {
+      status: summary.status === 'succeeded' ? 'succeeded' : summary.status === 'failed' ? 'failed' : 'error',
+      ...(summary.error === undefined ? {} : { failure: summary.error }),
+    }
+  }
+  return { status: 'error', failure: '子进程正常退出但没有回执' }
 }
 
 export async function runTask(taskId: string, opts: RunOptions): Promise<RunResult> {
@@ -246,15 +314,9 @@ export async function runTask(taskId: string, opts: RunOptions): Promise<RunResu
           ops.map((op) => JSON.stringify(op)).join('\n') + (ops.length ? '\n' : ''),
         )
       }
-      if (summary) {
-        status = summary.status === 'succeeded' ? 'succeeded' : summary.status === 'failed' ? 'failed' : 'error'
-        failure = summary.error
-      } else if (exec.timedOut) {
-        status = 'timeout'
-        failure = '墙钟超时，已硬杀进程组'
-      } else if (exec.code !== 0) {
-        failure = exec.stderr.trim() || '子进程退出码 ' + String(exec.code)
-      }
+      const outcome = settleOutcome(summary, exec)
+      status = outcome.status
+      failure = outcome.failure
     }
   } catch (err) {
     failure = err instanceof Error ? err.message : String(err)
