@@ -14,12 +14,16 @@ import { fileURLToPath } from 'node:url'
  * 前提：发行版内有 node ≥24 与全局 dsh；runner 用户 uid 1000。
  *
  * 三轮验收（每轮独立 run-id 与所有权 token；清理凭 /run 下的标记 + token，不凭 ID）：
- *   main     —— 成功路径：会话完成、上游只收预期请求、直连/链路本地/未授权路由拒绝、
+ *   main     —— 成功路径：会话完成、上游只收预期请求、直连/未授权路由拒绝、
  *               降权生效、key 注入生命周期、无残留
  *   fault    —— 故障路径：ns 里放一个脱离会话的挂起进程（就绪握手后收尾），
  *               销毁必须终止持有命名空间的进程
  *   conflict —— 预置同名资源与进程：create 必须拒绝（exit 3），且拒绝后的清理
  *               （会话 trap 与驱动 finally）都不得动它们 —— 事后原资源原进程仍在
+ *   race     —— 并发同 ID 双 create（不同 token）：恰一个成功；失败方不覆盖标记、
+ *               不破坏成功方资源；错 token 的 destroy 被拒（exit 4）
+ *   faildel  —— 受控删除失败（注入跳过 netns 删除）：destroy 返回 6 且保留所有权
+ *               标记；携同一 token 重试可完成清理
  */
 
 const DISTRO = process.argv[2] ?? ''
@@ -56,8 +60,17 @@ function wsl(args: string[], timeoutMs = 120_000): Promise<{ code: number | null
   })
 }
 
-async function runOnce(mode: 'main' | 'fault' | 'conflict'): Promise<void> {
-  const label = mode === 'fault' ? '[故障] ' : mode === 'conflict' ? '[冲突] ' : ''
+async function runOnce(mode: 'main' | 'fault' | 'conflict' | 'race' | 'faildel'): Promise<void> {
+  const label =
+    mode === 'fault'
+      ? '[故障] '
+      : mode === 'conflict'
+        ? '[冲突] '
+        : mode === 'race'
+          ? '[并发] '
+          : mode === 'faildel'
+            ? '[失败保标记] '
+            : ''
   const ID = randomBytes(3).toString('hex')
   const TOKEN = randomBytes(16).toString('hex')
   const RUN = '/tmp/bench-netns-' + ID
@@ -88,6 +101,106 @@ async function runOnce(mode: 'main' | 'fault' | 'conflict'): Promise<void> {
     check(transfer.code === 0, label + '验收件已打入发行版（stdin tar）', 'tar 退出码=' + String(transfer.code))
     // 工作区若是 CRLF 检出，bash 会嚼不动 —— 统一转 LF
     await wsl(['-u', 'root', '--exec', 'sh', '-c', `sed -i 's/\\r$//' ${RUN}/stage/*.sh`])
+
+    // race / faildel 直达生命周期脚本（被测单元是所有权生命周期本身，无需起会话）
+    if (mode === 'race' || mode === 'faildel') {
+      const TOKEN_B = randomBytes(16).toString('hex')
+      if (mode === 'race') {
+        const r = await wsl([
+          '-u',
+          'root',
+          '--exec',
+          'sh',
+          '-c',
+          `bash ${RUN}/stage/egress-netns.sh ${ID} create 10.212.61.1 10.212.61.2 8787 ${TOKEN} & p1=$!; ` +
+            `bash ${RUN}/stage/egress-netns.sh ${ID} create 10.212.61.1 10.212.61.2 8787 ${TOKEN_B} & p2=$!; ` +
+            `wait $p1; r1=$?; wait $p2; r2=$?; echo "r1=$r1 r2=$r2"; cat /run/bench-egress/${ID}.token`,
+        ])
+        const m = r.stdout.match(/r1=(\d+) r2=(\d+)\s*\n([0-9a-f]+)/)
+        const r1 = m?.[1] ?? '?'
+        const r2 = m?.[2] ?? '?'
+        const marker = m?.[3] ?? ''
+        check(
+          (r1 === '0' && r2 === '3') || (r1 === '3' && r2 === '0'),
+          '[并发] 同 ID 双 create 恰有一个成功',
+          'r1=' + r1 + ' r2=' + r2,
+        )
+        const winner = r1 === '0' ? TOKEN : r2 === '0' ? TOKEN_B : ''
+        check(marker === winner, '[并发] 所有权标记归成功方（失败方未覆盖）', marker.slice(0, 8) + '…')
+        const wrong = await wsl([
+          '-u',
+          'root',
+          '--exec',
+          'bash',
+          RUN + '/stage/egress-netns.sh',
+          ID,
+          'destroy',
+          'deadbeef',
+        ])
+        check(wrong.code === 4, '[并发] 错 token 的 destroy 被拒（exit 4）', 'code=' + String(wrong.code))
+        const win = await wsl(['-u', 'root', '--exec', 'bash', RUN + '/stage/egress-netns.sh', ID, 'destroy', winner])
+        check(win.code === 0, '[并发] 胜者 token 清理成功', 'code=' + String(win.code))
+      } else {
+        const created = await wsl([
+          '-u',
+          'root',
+          '--exec',
+          'bash',
+          RUN + '/stage/egress-netns.sh',
+          ID,
+          'create',
+          '10.212.61.1',
+          '10.212.61.2',
+          '8787',
+          TOKEN,
+        ])
+        check(created.code === 0, '[失败保标记] 环境已创建', 'code=' + String(created.code))
+        const failed = await wsl([
+          '-u',
+          'root',
+          '--exec',
+          'env',
+          'BENCH_NETNS_FAULT=keep-ns',
+          'bash',
+          RUN + '/stage/egress-netns.sh',
+          ID,
+          'destroy',
+          TOKEN,
+        ])
+        check(failed.code === 6, '[失败保标记] 清理失败返回 6', 'code=' + String(failed.code))
+        const kept = await wsl([
+          '-u',
+          'root',
+          '--exec',
+          'sh',
+          '-c',
+          `ip netns list | grep -c bench-${ID}; [ -f /run/bench-egress/${ID}.token ] && echo marker || echo nomarker`,
+        ])
+        const [nsLeft, markerLeft] = kept.stdout.split('\n').map((s) => s.trim())
+        check(
+          nsLeft === '1' && markerLeft === 'marker',
+          '[失败保标记] 标记与资源都保留（可重试）',
+          'ns=' + String(nsLeft) + ' marker=' + String(markerLeft),
+        )
+        const retry = await wsl(['-u', 'root', '--exec', 'bash', RUN + '/stage/egress-netns.sh', ID, 'destroy', TOKEN])
+        check(retry.code === 0, '[失败保标记] 同一 token 重试清理成功', 'code=' + String(retry.code))
+        const gone = await wsl([
+          '-u',
+          'root',
+          '--exec',
+          'sh',
+          '-c',
+          `ip netns list | grep -c bench-${ID}; [ -f /run/bench-egress/${ID}.token ] && echo marker || echo nomarker`,
+        ])
+        const [nsGone, markerGone] = gone.stdout.split('\n').map((s) => s.trim())
+        check(
+          nsGone === '0' && markerGone === 'nomarker',
+          '[失败保标记] 重试后资源与标记均清除',
+          'ns=' + String(nsGone) + ' marker=' + String(markerGone),
+        )
+      }
+      return
+    }
 
     if (mode === 'conflict') {
       // 预置同名资源：netns + 其中的一个进程（setsid 脱离 wsl 会话、bash 的 exec -a）——
@@ -268,10 +381,12 @@ async function runOnce(mode: 'main' | 'fault' | 'conflict'): Promise<void> {
 await runOnce('main')
 await runOnce('fault')
 await runOnce('conflict')
+await runOnce('race')
+await runOnce('faildel')
 
 console.log(
   failures.length === 0
-    ? 'netns 内 DSH 整体验收通过（成功/故障/冲突三路径）'
+    ? 'netns 内 DSH 整体验收通过（成功/故障/冲突/并发/失败保标记五路径）'
     : 'netns 内 DSH 整体验收失败：' + failures.join('；'),
 )
 process.exitCode = failures.length === 0 ? 0 : 1

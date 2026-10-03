@@ -106,7 +106,8 @@ with p.open("xb") as f:
 iptables 链 / 运行目录含临时凭据一并清理）。代理新增 `port` 绑定选项 —— netns
 防火墙按已知端口放行，动态端口不可用。
 
-实测断言全过（main 成功 + fault 故障 + conflict 冲突三轮）：ns 内非特权 DSH（全新
+实测断言全过（main 成功 + fault 故障 + conflict 冲突 + race 并发 + faildel
+失败保标记五轮）：ns 内非特权 DSH（全新
 `DSH_HOME`、环境变量白名单、会话有界）完成会话（exit 0、final、`turn_end:
 completed`）；模拟上游只收到 2 个预期请求（固定路径、`Bearer <合成 key>`、无代理
 token，原文兜底 grep 亦无；其一为辅助请求，来源未确认）；ns 内可到代理端口、
@@ -127,8 +128,13 @@ token，原文兜底 grep 亦无；其一为辅助请求，来源未确认）；
   （`/run` 与 netns 同寿命，停机同消）；destroy 只在标记存在且 token 相符时动手，
   缺标记一律跳过 —— **清理凭所有权记录，不凭 ID**（会话 trap 与驱动超时恢复都
   持同一 token）。同名 netns/veth/链/标记已存在即拒绝（exit 3），ERR 回滚只碰
-  已落标记的名字。冲突负例实测：预置同名资源与进程后运行，create 拒绝，
-  两层清理均未碰它们，原资源原进程事后仍在。
+  已落标记的名字。并发同 ID 的 create/destroy 全程持 `flock`（锁内查冲突、落
+  标记、动资源；锁文件不删 —— flock 按 inode，unlink 会破坏互斥）；**清理后
+  核验**资源与进程确已消失，有残留则保留标记并返回 6，携同一 token 可重试。
+  三类负例实测：冲突（预置同名资源与进程，create 拒绝后两层清理均未碰它们）、
+  并发（双 create 恰一个成功，失败方不覆盖标记；错 token 的 destroy 被拒
+  exit 4）、受控删除失败（注入跳过 netns 删除 → exit 6 且标记保留 → 同 token
+  重试清理成功）。
 - **有界清理**：销毁先经 `ip netns pids` 有界终止（TERM→等→KILL）持有命名空间的
   进程 —— 删名字不会杀它们；故障路径实测：ns 里脱离会话的挂起进程（**就绪握手
   确认其已在命名空间内并存活**后才收尾）被销毁终止。DSH 会话与驱动的每次 `wsl`
