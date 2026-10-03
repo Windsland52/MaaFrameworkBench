@@ -19,6 +19,7 @@
     "check:device": "node scripts/check-device.ts",
     "check:integration": "node scripts/check-integration.ts",
     "check:selftest": "node scripts/check-selftest.ts",
+    "check:egress": "node scripts/check-egress.ts",
     "check": "pnpm typecheck && pnpm format:check && node scripts/check-usage.ts && node scripts/check-device.ts && node scripts/check-rules.ts && node scripts/check-tasks.ts && node scripts/check-method.ts && node scripts/verify-loop.ts",
     "method": "node scripts/check-method.ts",
     "verify": "node scripts/verify-loop.ts",

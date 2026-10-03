@@ -7,6 +7,7 @@
 > v1.4（2026-10-02）：增加 frames 设备 HTTP 协议与远程 controller 适配器；仅冻结已实现的协议，不冻结 WSL／容器生命周期。
 > v1.4.1（2026-10-03）：swipe 时长只校验不生效；远程设备形态的 exec 回执只含框架侧，环境证据由宿主侧合入 `ops.jsonl`；runner 已有最小接入（宿主起服务、子进程持 `remoteFramesActor`）；子进程 stderr 非空归档为 `exec-stderr.log`。
 > v1.4.2（2026-10-03）：冻结自测入口 `src/selftest/entry.ts` —— 输入项目/入口/设备地址/token（OCR 为环境配置），依赖闭包仅三份源文件，部署清单另含 Node 运行时、maa-node 包（含原生库）与 OCR 目录；输出状态/轨迹/调试截图，不含断言与环境内部状态；退出码区分链路健康（task failed 且无设备通信异常也为 0）与设备通信异常/加载失败/框架错误（1）。
+> v1.4.3（2026-10-03）：目录约定登记 `src/egress/`（会话出站固定路由代理）—— 仅登记归属，接口待网络通路整体验收后冻结。
 > 目的：让"重开会话"和"上团队"都成立 —— 后续所有工作只依赖本文 + `MaaFrameworkBench-设计定稿-2026-09-15.md`
 > 已实测的实施事实见文末。
 
@@ -519,6 +520,7 @@ src/env/                   环境层：每种环境产出一个 MaaFW Controller
   web/                     网页交互环境（待建）：标本应用（页面 + 驱动）在这里
   replay/                  真实录制回放（待建）
 src/selftest/             可独立分发的自测入口（entry.ts；三份文件复制即离仓运行，见 §3）
+src/egress/                会话出站基础设施：固定路由代理（不属于设备 Controller）
 src/runner/                执行器（待建）
 src/scorer/                判分器（待建）
 tasks/<task_id>/           任务包（task.yaml + seed/；画面在数据集里，不在包内）
